@@ -1,17 +1,40 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { supabase } from '../supabaseClient';
 
-const MeetingList = ({ meetings }) => (
-  <div>
-    {meetings.map((meeting, index) => (
-      <div key={index}>
-        <h2>{meeting.committee} - {meeting.date}</h2>
-        <p>{meeting.description}</p>
-        {meeting.documents.map((doc, i) => (
-          <div key={i}><a href={doc.url} target="_blank" rel="noreferrer">{doc.type}</a></div>
-        ))}
-      </div>
-    ))}
-  </div>
-);
+const MeetingList = () => {
+  const [meetings, setMeetings] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchMeetings = async () => {
+      const { data, error } = await supabase
+        .from('meetings')
+        .select('id, date, description, committee_id')
+        .order('date', { ascending: false });
+
+      if (!error) {
+        setMeetings(data);
+      } else {
+        console.error(error);
+      }
+      setLoading(false);
+    };
+
+    fetchMeetings();
+  }, []);
+
+  if (loading) return <p>Loading meetings...</p>;
+
+  return (
+    <div>
+      {meetings.map((meeting) => (
+        <div key={meeting.id}>
+          <h2>{meeting.date}</h2>
+          <p>{meeting.description}</p>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 export default MeetingList;
