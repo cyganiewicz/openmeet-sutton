@@ -1,0 +1,23 @@
+backend:
+  name: git-gateway
+  branch: main
+
+media_folder: "public/docs"
+public_folder: "/docs"
+
+collections:
+  - name: "meetings"
+    label: "Meetings"
+    folder: "src/data"
+    create: true
+    slug: "{{year}}-{{month}}-{{day}}-{{slug}}"
+    fields:
+      - { label: "Committee", name: "committee", widget: "string" }
+      - { label: "Date", name: "date", widget: "datetime" }
+      - { label: "Description", name: "description", widget: "text" }
+      - label: "Documents"
+        name: "documents"
+        widget: "list"
+        fields:
+          - { label: "Type", name: "type", widget: "string" }
+          - { label: "URL", name: "url", widget: "string" }
