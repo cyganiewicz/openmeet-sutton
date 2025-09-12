@@ -1,0 +1,28 @@
+<!doctype html><html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenMeet Sutton</title>
+<link rel="stylesheet" href="./assets/theme.css">
+</head><body><div class="wrap">
+  <header style="display:flex;justify-content:space-between;align-items:center">
+    <h1>OpenMeet Sutton</h1>
+    <nav><a class="btn" href="./clerk.html">Clerk Console</a></nav>
+  </header>
+
+  <h3>Upcoming / Recent Meetings</h3>
+  <div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px"></div>
+</div>
+<script type="module">
+  import {listMeetings} from './js/api.js';
+  const data = await listMeetings('&limit=24');
+  const root = document.getElementById('grid');
+  for (const m of data){
+    const el=document.createElement('div'); el.className='card';
+    el.innerHTML=`
+      <div style="opacity:.8">${m.board_name}</div>
+      <div style="font-size:18px;margin:6px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
+      <div>${m.location||''}</div>
+      <a class="btn" href="./meeting.html?id=${encodeURIComponent(m.meeting_id)}">View meeting</a>`;
+    root.appendChild(el);
+  }
+</script>
+</body></html>
