@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OpenMeet – Staff Uploader</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="./assets/theme.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="wrap">
+  <header style="display:flex;justify-content:space-between;align-items:center">
+    <h1>Staff Uploader</h1>
+    <div id="signin"></div>
+  </header>
+
+  <div id="app" style="display:none">
+    <div class="card">
+      <label>Your email (will be read from Google Sign-In)</label>
+      <div class="badge">Signed in</div>
+      <div class="section-title" style="margin-top:8px">Board / Committee</div>
+      <select id="board"></select>
+    </div>
+
+    <div class="card">
+      <h3>Create Meeting</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label>Date (YYYY-MM-DD)</label>
+          <input id="mDate" placeholder="2025-10-20">
+        </div>
+        <div>
+          <label>Start Time (HH:MM)</label>
+          <input id="mTime" placeholder="19:00">
+        </div>
+      </div>
+      <label>Title</label><input id="mTitle" placeholder="Regular Meeting">
+      <label>Location</label><input id="mLoc" placeholder="Town Hall">
+      <button class="btn" id="btnCreate">Create meeting</button>
+      <div id="mOut" class="muted" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <h3>Upload documents</h3>
+      <div class="muted" style="margin-bottom:6px">Agenda & Packet need Clerk approval. Exhibits publish immediately unless the board requires approval.</div>
+      <label>Meeting ID</label>
+      <input id="meetingId" placeholder="m_... (auto-filled after creating a meeting)">
+      <label>File</label>
+      <input type="file" id="file">
+      <label>Note</label>
+      <input id="note" placeholder="(optional) e.g., Added traffic memo">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn" id="btnAgenda">Submit AGENDA (needs Clerk)</button>
+        <button class="btn" id="btnPacket">Submit PACKET (needs Clerk)</button>
+        <button class="btn" id="btnExhibit">Publish EXHIBIT</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { renderSignIn, postSecure } from './js/auth.js';
+
+  const app = document.getElementById('app');
+  renderSignIn('signin', async () => {
+    app.style.display = 'block';
+    await loadBoards();
+  });
+
+  async function loadBoards(){
+    // public endpoint is fine for listing
+    const url = new URL('./api/public/meetings', 'about:blank'); // dummy
+    // Instead call GAS boards UI helper via GET (CORS is open)
+    const r = await fetch(`${(await import('./js/auth.js')).WEBAPP_URL}?route=api/ui/boards`);
+    const boards = await r.json();
+    const sel = document.getElementById('board');
+    sel.innerHTML = '<option value="">Select a board/committee…</option>' + boards.map(b=>`<option value="${b.board_id}">${b.name}</option>`).join('');
+  }
+
+  document.getElementById('btnCreate').onclick = async () => {
+    const board_id = document.getElementById('board').value;
+    const date = document.getElementById('mDate').value.trim();
+    const title= document.getElementById('mTitle').value.trim() || 'Regular';
+    const loc  = document.getElementById('mLoc').value.trim();
+    const time = document.getElementById('mTime').value.trim();
+    if(!board_id) return alert('Choose a board');
+    if(!date) return alert('Enter a date');
+
+    try{
+      const res = await postSecure('sec_create_meeting', { board_id, date, title, location:loc, start_time:time });
+      document.getElementById('meetingId').value = res.meeting_id;
+      document.getElementById('mOut').textContent = 'Meeting created: '+res.meeting_id;
+      alert('Meeting created');
+    }catch(e){ alert(e.message); }
+  };
+
+  async function toB64(file){
+    const arr=await file.arrayBuffer(); let bin=''; const bytes=new Uint8Array(arr);
+    for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]); return btoa(bin);
+  }
+
+  async function upload(kind){
+    const mid=document.getElementById('meetingId').value.trim();
+    const file=document.getElementById('file').files[0];
+    const note=document.getElementById('note').value;
+    if(!mid) return alert('Create/enter meeting ID first');
+    if(!file) return alert('Choose a file');
+
+    try{
+      const file_b64 = await toB64(file);
+      await postSecure('sec_submit_file', { meeting_id: mid, type: kind, file_b64, mimeType: file.type||'application/octet-stream', fileName:file.name, note });
+      alert(kind==='exhibit' ? 'Exhibit published' : 'Submitted for Clerk approval');
+    }catch(e){ alert(e.message); }
+  }
+
+  document.getElementById('btnAgenda').onclick = () => upload('agenda');
+  document.getElementById('btnPacket').onclick = () => upload('packet');
+  document.getElementById('btnExhibit').onclick = () => upload('exhibit');
+</script>
+</body>
+</html>
