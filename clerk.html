@@ -1,13 +1,80 @@
-<!doctype html><html><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Clerk Console – OpenMeet</title><link rel="stylesheet" href="./assets/theme.css">
-</head><body><div class="wrap">
-  <h2>Clerk Console</h2>
-  <div class="card">
-    <iframe src="https://script.google.com/macros/s/AKfycbzz1vfALij7VdOOhI_gI2ZnCsHydglOsG1kXIG6Yp2sXWdpqScVwxwm-YBg5-6DeOrz/exec?route=clerk" style="width:100%;height:70vh;border:0;border-radius:12px;background:#fff"></iframe>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OpenMeet – Clerk Console</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="./assets/theme.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="wrap">
+  <header style="display:flex;justify-content:space-between;align-items:center">
+    <h1>Clerk Console</h1>
+    <div id="signin"></div>
+  </header>
+
+  <div id="app" style="display:none">
+    <h3>Files awaiting approval</h3>
+    <div id="pending"></div>
+
+    <h3 style="margin-top:20px">Meetings (next 14 days) without a posted agenda</h3>
+    <div id="needs"></div>
   </div>
-  <div class="card">
-    <h3>Uploader (Chairs/Staff)</h3>
-    <iframe src="https://script.google.com/macros/s/AKfycbzz1vfALij7VdOOhI_gI2ZnCsHydglOsG1kXIG6Yp2sXWdpqScVwxwm-YBg5-6DeOrz/exec?route=uploader" style="width:100%;height:70vh;border:0;border-radius:12px;background:#fff"></iframe>
-  </div>
-</div></body></html>
+</div>
+
+<script type="module">
+  import { renderSignIn, postSecure, WEBAPP_URL } from './js/auth.js';
+
+  const app = document.getElementById('app');
+  renderSignIn('signin', async () => {
+    app.style.display = 'block';
+    await refresh();
+  });
+
+  async function refresh(){
+    // Pending files
+    let p = await postSecure('sec_pending', {});
+    const root = document.getElementById('pending');
+    root.innerHTML = '';
+    if (!p.length){
+      const div=document.createElement('div'); div.className='card muted'; div.textContent='No files awaiting approval.'; root.appendChild(div);
+    } else {
+      for(const r of p){
+        const div=document.createElement('div'); div.className='card';
+        div.innerHTML = `
+          <div><b>${r.board_name || ''}</b> — ${r.meeting_date || ''} — <i>${r.type}</i> submitted by ${r.submitted_by || 'unknown'}</div>
+          <div style="margin:8px 0"><a target="_blank" href="https://drive.google.com/file/d/${r.file_id}/view">Preview draft</a></div>
+          <button class="btn" data-id="${r.row_id}">Approve → Publish</button>`;
+        div.querySelector('button').onclick = async (e)=>{
+          e.target.disabled=true;
+          try{
+            await postSecure('sec_approve', { row_id: r.row_id });
+            alert('Approved & published');
+            await refresh();
+          }catch(err){ alert(err.message); e.target.disabled=false; }
+        };
+        root.appendChild(div);
+      }
+    }
+
+    // Needs agenda
+    let n = await postSecure('sec_needs_agenda', {});
+    const needRoot = document.getElementById('needs');
+    needRoot.innerHTML='';
+    if (!n.length){
+      const div=document.createElement('div'); div.className='card muted'; div.textContent='All upcoming meetings have a posted agenda.'; needRoot.appendChild(div);
+    } else {
+      for(const m of n){
+        const div=document.createElement('div'); div.className='card';
+        const link = `${WEBAPP_URL}`; // Staff uploader is at /upload.html (not here)
+        div.innerHTML = `
+          <div><b>${m.board_name || ''}</b> — ${m.date} — ${m.title || 'Regular'}</div>
+          <div class="muted" style="margin-top:6px">No approved agenda has been posted yet.</div>`;
+        needRoot.appendChild(div);
+      }
+    }
+  }
+</script>
+</body>
+</html>
