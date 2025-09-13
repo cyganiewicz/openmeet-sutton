@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OpenMeet – Admin</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="./assets/theme.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="wrap">
+  <header style="display:flex;justify-content:space-between;align-items:center">
+    <h1>Admin</h1>
+    <div id="signin"></div>
+  </header>
+
+  <div id="app" style="display:none">
+    <div class="card">
+      <h3>Approval Queue</h3>
+      <div id="pending"></div>
+    </div>
+
+    <div class="card">
+      <h3>Manage Materials (Drive)</h3>
+      <label>Meeting ID</label><input id="mid" placeholder="m_...">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <button class="btn" id="btnList">List Draft/Public</button>
+      </div>
+      <div id="driveLists" class="grid"></div>
+      <div style="margin-top:12px">
+        <label>Upload file</label><input type="file" id="upfile">
+        <select id="target"><option value="draft">Drafts</option><option value="public">Public</option></select>
+        <button class="btn" id="btnUpload">Upload</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { renderSignIn, postSecure } from './js/auth.js';
+
+  const app = document.getElementById('app');
+  renderSignIn('signin', async ()=>{ app.style.display='block'; await refreshQueue(); });
+
+  async function refreshQueue(){
+    const root=document.getElementById('pending'); root.innerHTML='';
+    try{
+      const items = await postSecure('admin_pending',{});
+      if(!items.length){ const d=document.createElement('div'); d.className='muted'; d.textContent='No files awaiting approval.'; root.appendChild(d); return; }
+      items.forEach(r=>{
+        const d=document.createElement('div'); d.className='card';
+        d.innerHTML = `
+          <div><b>${r.board_name||''}</b> — ${r.meeting_date||''} — <i>${r.type}</i> by ${r.submitted_by||'unknown'}</div>
+          <div style="margin:8px 0"><a class="btn" target="_blank" href="https://drive.google.com/file/d/${r.file_id}/view">Preview draft</a></div>
+          <button class="btn" data-id="${r.row_id}">Approve → Publish</button>`;
+        d.querySelector('button').onclick = async (e)=>{ e.target.disabled=true; try{ await postSecure('admin_approve',{row_id:r.row_id}); alert('Published'); await refreshQueue(); }catch(err){ alert(err.message); e.target.disabled=false; } };
+        root.appendChild(d);
+      });
+    }catch(e){ alert(e.message); }
+  }
+
+  // Drive section
+  btnList.onclick = async ()=>{
+    const mid=mid.value.trim(); if(!mid) return alert('Enter meeting ID');
+    try{
+      const res = await postSecure('admin_drive_list',{meeting_id:mid});
+      const out=document.getElementById('driveLists'); out.innerHTML='';
+      const col = (title, items, tag) => {
+        const c=document.createElement('div'); c.className='card';
+        c.innerHTML=`<h4>${title}</h4>` + (items.length? '' : '<div class="muted">No files</div>');
+        items.forEach(f=>{
+          const row=document.createElement('div'); row.style.margin='8px 0';
+          row.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+            <a class="btn" target="_blank" href="${f.link}">${f.name}</a>
+            <button class="btn" data-id="${f.id}" data-tag="${tag}">Delete</button></div>`;
+          row.querySelector('button').onclick = async (e)=>{ if(!confirm('Move to trash?')) return;
+            try{ await postSecure('admin_drive_delete',{file_id:e.target.dataset.id}); row.remove(); }catch(err){ alert(err.message); }
+          };
+          c.appendChild(row);
+        });
+        out.appendChild(c);
+      };
+      col('Draft Folder', res.draft||[], 'draft');
+      col('Public Folder', res.public||[], 'public');
+    }catch(e){ alert(e.message); }
+  };
+
+  function toB64(file){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result.split(',')[1]); fr.readAsDataURL(file); }); }
+  btnUpload.onclick = async ()=>{
+    const mid=window.mid.value.trim(); const file=upfile.files[0]; const target=document.getElementById('target').value;
+    if(!mid) return alert('Enter meeting ID'); if(!file) return alert('Choose a file');
+    try{
+      const file_b64 = await toB64(file);
+      await postSecure('admin_drive_upload',{meeting_id:mid, target, file_b64, mimeType:file.type||'application/octet-stream', fileName:file.name});
+      alert('Uploaded'); btnList.click();
+    }catch(e){ alert(e.message); }
+  };
+</script>
+</body>
+</html>
