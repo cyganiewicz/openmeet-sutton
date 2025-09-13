@@ -1,28 +1,40 @@
-<!doctype html><html><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OpenMeet Sutton</title>
-<link rel="stylesheet" href="./assets/theme.css">
-</head><body><div class="wrap">
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OpenMeet – Sutton</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="./assets/theme.css">
+</head>
+<body>
+<div class="wrap">
   <header style="display:flex;justify-content:space-between;align-items:center">
-    <h1>OpenMeet Sutton</h1>
-    <nav><a class="btn" href="./clerk.html">Clerk Console</a></nav>
+    <h1>OpenMeet</h1>
+    <div>
+      <a class="btn" href="./create.html">Create / Revise a meeting</a>
+      <a class="btn" href="./admin.html">Admin</a>
+    </div>
   </header>
 
-  <h3>Upcoming / Recent Meetings</h3>
-  <div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px"></div>
+  <h3>Upcoming / Recent</h3>
+  <div id="grid" class="grid"></div>
 </div>
+
 <script type="module">
-  import {listMeetings} from './js/api.js';
-  const data = await listMeetings('&limit=24');
-  const root = document.getElementById('grid');
-  for (const m of data){
-    const el=document.createElement('div'); el.className='card';
-    el.innerHTML=`
-      <div style="opacity:.8">${m.board_name}</div>
+  import { WEBAPP_URL } from './js/auth.js'; // just to reuse the URL constant
+  async function j(u){ const r=await fetch(u); return r.json(); }
+  const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=30`);
+  const grid = document.getElementById('grid');
+  meetings.forEach(m=>{
+    const d=document.createElement('div'); d.className='card';
+    d.innerHTML = `
+      <div class="muted">${m.board_name||''}</div>
       <div style="font-size:18px;margin:6px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
       <div>${m.location||''}</div>
-      <a class="btn" href="./meeting.html?id=${encodeURIComponent(m.meeting_id)}">View meeting</a>`;
-    root.appendChild(el);
-  }
+      <div style="margin-top:8px"><a class="btn" href="./meeting.html?id=${encodeURIComponent(m.meeting_id)}">View</a></div>
+    `;
+    grid.appendChild(d);
+  });
 </script>
-</body></html>
+</body>
+</html>
