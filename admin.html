@@ -15,86 +15,56 @@
   </header>
 
   <div id="app" style="display:none">
-    <div class="card">
-      <h3>Approval Queue</h3>
-      <div id="pending"></div>
-    </div>
-
-    <div class="card">
-      <h3>Manage Materials (Drive)</h3>
-      <label>Meeting ID</label><input id="mid" placeholder="m_...">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
-        <button class="btn" id="btnList">List Draft/Public</button>
-      </div>
-      <div id="driveLists" class="grid"></div>
-      <div style="margin-top:12px">
-        <label>Upload file</label><input type="file" id="upfile">
-        <select id="target"><option value="draft">Drafts</option><option value="public">Public</option></select>
-        <button class="btn" id="btnUpload">Upload</button>
-      </div>
-    </div>
+    <div id="list"></div>
   </div>
 </div>
 
 <script type="module">
-  import { renderSignIn, postSecure } from './js/auth.js';
+  import { renderSignIn, postSecure, WEBAPP_URL } from './js/auth.js';
 
   const app = document.getElementById('app');
-  renderSignIn('signin', async ()=>{ app.style.display='block'; await refreshQueue(); });
+  renderSignIn('signin', async ()=>{ app.style.display='block'; await build(); });
 
-  async function refreshQueue(){
-    const root=document.getElementById('pending'); root.innerHTML='';
-    try{
-      const items = await postSecure('admin_pending',{});
-      if(!items.length){ const d=document.createElement('div'); d.className='muted'; d.textContent='No files awaiting approval.'; root.appendChild(d); return; }
-      items.forEach(r=>{
-        const d=document.createElement('div'); d.className='card';
-        d.innerHTML = `
-          <div><b>${r.board_name||''}</b> — ${r.meeting_date||''} — <i>${r.type}</i> by ${r.submitted_by||'unknown'}</div>
-          <div style="margin:8px 0"><a class="btn" target="_blank" href="https://drive.google.com/file/d/${r.file_id}/view">Preview draft</a></div>
-          <button class="btn" data-id="${r.row_id}">Approve → Publish</button>`;
-        d.querySelector('button').onclick = async (e)=>{ e.target.disabled=true; try{ await postSecure('admin_approve',{row_id:r.row_id}); alert('Published'); await refreshQueue(); }catch(err){ alert(err.message); e.target.disabled=false; } };
-        root.appendChild(d);
-      });
-    }catch(e){ alert(e.message); }
+  async function j(u){ const r=await fetch(u); return r.json(); }
+
+  async function build(){
+    const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=50`);
+    const pending = await postSecure('admin_pending', {});
+    const pendingByMid = pending.reduce((m,x)=>{ (m[x.meeting_id]=m[x.meeting_id]||[]).push(x); return m; }, {});
+    const root = document.getElementById('list'); root.innerHTML='';
+
+    // For quick badge: whether approved agenda exists
+    async function hasAgenda(mid){
+      const fs = await j(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(mid)}`);
+      return fs.some(x=>x.type==='agenda');
+    }
+
+    for (const m of meetings){
+      // pull agenda presence (sequential to keep simple)
+      const agenda = await hasAgenda(m.meeting_id);
+      const pend   = pendingByMid[m.meeting_id] || [];
+      const card = document.createElement('div'); card.className='card';
+      const badges = [];
+      if (!agenda) badges.push('<span class="badge">Needs agenda</span>');
+      if (pend.length) badges.push(`<span class="badge">${pend.length} pending</span>`);
+      if (m.status==='awaiting-approval') badges.push('<span class="badge">Awaiting approval</span>');
+      if (m.status==='posted') badges.push('<span class="badge">Posted</span>');
+
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+          <div>
+            <div class="muted">${m.board_name||''}</div>
+            <div style="font-size:18px;margin:4px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
+            <div class="muted">${m.location||''}</div>
+            <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${badges.join('')}</div>
+          </div>
+          <div>
+            <a class="btn" href="./admin_edit.html?id=${encodeURIComponent(m.meeting_id)}">Edit</a>
+          </div>
+        </div>`;
+      root.appendChild(card);
+    }
   }
-
-  // Drive section
-  btnList.onclick = async ()=>{
-    const mid=mid.value.trim(); if(!mid) return alert('Enter meeting ID');
-    try{
-      const res = await postSecure('admin_drive_list',{meeting_id:mid});
-      const out=document.getElementById('driveLists'); out.innerHTML='';
-      const col = (title, items, tag) => {
-        const c=document.createElement('div'); c.className='card';
-        c.innerHTML=`<h4>${title}</h4>` + (items.length? '' : '<div class="muted">No files</div>');
-        items.forEach(f=>{
-          const row=document.createElement('div'); row.style.margin='8px 0';
-          row.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
-            <a class="btn" target="_blank" href="${f.link}">${f.name}</a>
-            <button class="btn" data-id="${f.id}" data-tag="${tag}">Delete</button></div>`;
-          row.querySelector('button').onclick = async (e)=>{ if(!confirm('Move to trash?')) return;
-            try{ await postSecure('admin_drive_delete',{file_id:e.target.dataset.id}); row.remove(); }catch(err){ alert(err.message); }
-          };
-          c.appendChild(row);
-        });
-        out.appendChild(c);
-      };
-      col('Draft Folder', res.draft||[], 'draft');
-      col('Public Folder', res.public||[], 'public');
-    }catch(e){ alert(e.message); }
-  };
-
-  function toB64(file){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result.split(',')[1]); fr.readAsDataURL(file); }); }
-  btnUpload.onclick = async ()=>{
-    const mid=window.mid.value.trim(); const file=upfile.files[0]; const target=document.getElementById('target').value;
-    if(!mid) return alert('Enter meeting ID'); if(!file) return alert('Choose a file');
-    try{
-      const file_b64 = await toB64(file);
-      await postSecure('admin_drive_upload',{meeting_id:mid, target, file_b64, mimeType:file.type||'application/octet-stream', fileName:file.name});
-      alert('Uploaded'); btnList.click();
-    }catch(e){ alert(e.message); }
-  };
 </script>
 </body>
 </html>
