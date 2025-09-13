@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OpenMeet – Edit Meeting</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="./assets/theme.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="wrap">
+  <a class="btn" href="./admin.html">← Back to Admin</a>
+  <h2>Edit Meeting</h2>
+  <div id="signin"></div>
+
+  <div id="app" style="display:none">
+    <div id="meta" class="card"></div>
+
+    <div class="card">
+      <h3>Update Details</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Date</label><input id="date"></div>
+        <div><label>Start Time</label><input id="time"></div>
+      </div>
+      <label>Title</label><input id="title">
+      <label>Location</label><input id="loc">
+      <label>Status</label>
+      <select id="status">
+        <option value="scheduled">scheduled</option>
+        <option value="awaiting-approval">awaiting-approval</option>
+        <option value="posted">posted</option>
+        <option value="cancelled">cancelled</option>
+      </select>
+      <label>YouTube URL (optional)</label><input id="yt">
+      <button class="btn" id="btnSave">Save changes</button>
+    </div>
+
+    <div class="card">
+      <h3>Approval Queue (this meeting)</h3>
+      <div id="queue"></div>
+    </div>
+
+    <div class="card">
+      <h3>Manage Materials (Drive)</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn" id="btnList">Refresh List</button>
+      </div>
+      <div id="drive" class="grid"></div>
+      <div style="margin-top:12px">
+        <label>Upload file</label><input type="file" id="upfile">
+        <select id="target"><option value="draft">Drafts</option><option value="public">Public</option></select>
+        <button class="btn" id="btnUpload">Upload</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { renderSignIn, postSecure, WEBAPP_URL } from './js/auth.js';
+  const mid = new URLSearchParams(location.search).get('id');
+
+  const app = document.getElementById('app');
+  renderSignIn('signin', async ()=>{ app.style.display='block'; await loadMeta(); await loadQueue(); await listDrive(); });
+
+  async function j(u){ const r=await fetch(u); return r.json(); }
+  function toB64(file){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result.split(',')[1]); fr.readAsDataURL(file); }); }
+
+  async function loadMeta(){
+    const m = await j(`${WEBAPP_URL}?route=api/public/meeting&id=${encodeURIComponent(mid)}`);
+    document.getElementById('meta').innerHTML = `
+      <div class="muted">${m.board_name||''}</div>
+      <div style="font-size:18px;margin:6px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
+      <div>${m.location||''}</div>
+      <div class="muted" style="margin-top:6px">Status: ${m.status}${m.posted_at?` • Posted ${m.posted_at}`:''}</div>`;
+    date.value = m.date || ''; time.value = m.start_time || ''; title.value = m.title || ''; loc.value = m.location || '';
+    status.value = m.status || 'scheduled'; yt.value = m.youtube_url || '';
+  }
+
+  btnSave.onclick = async ()=>{
+    try{
+      await postSecure('admin_update_meeting', { meeting_id: mid, date:date.value, start_time:time.value, title:title.value, location:loc.value, status:status.value, youtube_url:yt.value });
+      alert('Saved'); await loadMeta();
+    }catch(e){ alert(e.message); }
+  };
+
+  async function loadQueue(){
+    const all = await postSecure('admin_pending', {});
+    const mine = all.filter(x=> x.meeting_id===mid);
+    const root = document.getElementById('queue'); root.innerHTML='';
+    if (!mine.length){ root.innerHTML='<div class="muted">No pending items.</div>'; return; }
+    mine.forEach(r=>{
+      const d=document.createElement('div'); d.className='card';
+      d.innerHTML = `
+        <div><i>${r.type}</i> submitted by ${r.submitted_by||'unknown'}</div>
+        <div style="margin:8px 0"><a class="btn" target="_blank" href="https://drive.google.com/file/d/${r.file_id}/view">Preview draft</a></div>
+        <button class="btn">Approve → Publish</button>`;
+      d.querySelector('button').onclick = async (e)=>{ e.target.disabled=true; try{ await postSecure('admin_approve',{row_id:r.row_id}); alert('Published'); await loadQueue(); }catch(err){ alert(err.message); e.target.disabled=false; } };
+      root.appendChild(d);
+    });
+  }
+
+  async function listDrive(){
+    const res = await postSecure('admin_drive_list', { meeting_id: mid });
+    const out = document.getElementById('drive'); out.innerHTML='';
+    const col = (title, items, tag) => {
+      const c=document.createElement('div'); c.className='card';
+      c.innerHTML=`<h4>${title}</h4>` + (items.length? '' : '<div class="muted">No files</div>');
+      items.forEach(f=>{
+        const row=document.createElement('div'); row.style.margin='8px 0';
+        row.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+          <a class="btn" target="_blank" href="${f.link}">${f.name}</a>
+          <button class="btn" data-id="${f.id}">Delete</button></div>`;
+        row.querySelector('button').onclick = async (e)=>{ if(!confirm('Move to trash?')) return;
+          try{ await postSecure('admin_drive_delete',{file_id:e.target.dataset.id}); row.remove(); }catch(err){ alert(err.message); }
+        };
+        c.appendChild(row);
+      });
+      out.appendChild(c);
+    };
+    col('Draft Folder', res.draft||[], 'draft');
+    col('Public Folder', res.public||[], 'public');
+  }
+  btnList.onclick = listDrive;
+
+  btnUpload.onclick = async ()=>{
+    const file=upfile.files[0]; if(!file) return alert('Choose a file');
+    try{
+      const file_b64 = await toB64(file);
+      await postSecure('admin_drive_upload',{meeting_id:mid, target:target.value, file_b64, mimeType:file.type||'application/octet-stream', fileName:file.name});
+      alert('Uploaded'); await listDrive();
+    }catch(e){ alert(e.message); }
+  };
+</script>
+</body>
+</html>
