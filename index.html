@@ -11,7 +11,8 @@
   <header style="display:flex;justify-content:space-between;align-items:center">
     <h1>OpenMeet</h1>
     <div>
-      <a class="btn" href="./create.html">Create / Revise a meeting</a>
+      <a class="btn" href="./create.html">Create a meeting</a>
+      <a class="btn" href="./revise.html">Revise a meeting</a>
       <a class="btn" href="./admin.html">Admin</a>
     </div>
   </header>
@@ -21,7 +22,7 @@
 </div>
 
 <script type="module">
-  import { WEBAPP_URL } from './js/auth.js'; // just to reuse the URL constant
+  import { WEBAPP_URL } from './js/auth.js';
   async function j(u){ const r=await fetch(u); return r.json(); }
   const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=30`);
   const grid = document.getElementById('grid');
@@ -31,8 +32,7 @@
       <div class="muted">${m.board_name||''}</div>
       <div style="font-size:18px;margin:6px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
       <div>${m.location||''}</div>
-      <div style="margin-top:8px"><a class="btn" href="./meeting.html?id=${encodeURIComponent(m.meeting_id)}">View</a></div>
-    `;
+      <div style="margin-top:8px"><a class="btn" href="./meeting.html?id=${encodeURIComponent(m.meeting_id)}">View</a></div>`;
     grid.appendChild(d);
   });
 </script>
