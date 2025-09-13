@@ -2,14 +2,14 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>OpenMeet – Create/Revise</title>
+  <title>OpenMeet – Create Meeting</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
 </head>
 <body>
 <div class="wrap">
   <a class="btn" href="./">← Back</a>
-  <h2>Create or Revise a Meeting</h2>
+  <h2>Create a New Meeting</h2>
 
   <div class="card">
     <h3>1) Choose Board / Committee</h3>
@@ -17,7 +17,7 @@
   </div>
 
   <div class="card">
-    <h3>2) Create Meeting</h3>
+    <h3>2) Meeting Details</h3>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div><label>Date (YYYY-MM-DD)</label><input id="mDate" placeholder="2025-10-20"></div>
       <div><label>Start Time (HH:MM)</label><input id="mTime" placeholder="19:00"></div>
@@ -28,57 +28,25 @@
     <button class="btn" id="btnCreate">Create meeting</button>
     <div id="mOut" class="muted" style="margin-top:8px"></div>
   </div>
-
-  <div class="card">
-    <h3>3) Add / Revise Materials</h3>
-    <label>Meeting ID</label><input id="meetingId" placeholder="m_... (auto-filled after creation if you used step 2)">
-    <label>File</label><input type="file" id="file">
-    <label>Note</label><input id="note" placeholder="(optional)">
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-      <button class="btn" id="btnAgenda">Submit AGENDA (goes to Clerk)</button>
-      <button class="btn" id="btnPacket">Submit PACKET (goes to Clerk)</button>
-      <button class="btn" id="btnExhibit">Publish EXHIBIT</button>
-    </div>
-    <div class="muted" style="margin-top:6px">Agenda/Packet require Clerk approval. Exhibits publish immediately unless the board forces approval.</div>
-  </div>
 </div>
 
 <script type="module">
   import { WEBAPP_URL } from './js/auth.js';
-
   async function j(u){ const r=await fetch(u); return r.json(); }
   async function post(body){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const out=await r.json(); if(out.error) throw new Error(out.error); return out; }
-  function toB64(file){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result.split(',')[1]); fr.readAsDataURL(file); }); }
 
-  // load boards
   const boards = await j(`${WEBAPP_URL}?route=api/ui/boards`);
-  const sel = document.getElementById('board');
-  sel.innerHTML = '<option value="">Select a board/committee…</option>' + boards.map(b=>`<option value="${b.board_id}">${b.name}</option>`).join('');
+  board.innerHTML = '<option value="">Select a board/committee…</option>' + boards.map(b=>`<option value="${b.board_id}">${b.name}</option>`).join('');
 
-  document.getElementById('btnCreate').onclick = async ()=>{
-    const board_id=sel.value, date=mDate.value.trim(), title=mTitle.value.trim()||'Regular', loc=mLoc.value.trim(), time=mTime.value.trim(), email=document.getElementById('email').value.trim();
+  btnCreate.onclick = async ()=>{
+    const board_id=board.value, date=mDate.value.trim(), title=mTitle.value.trim()||'Regular', loc=mLoc.value.trim(), time=mTime.value.trim(), email=document.getElementById('email').value.trim();
     if(!board_id) return alert('Choose a board'); if(!date) return alert('Enter a date');
     try{
       const res = await post({action:'create_meeting_open', board_id, date, title, location:loc, start_time:time, submitterEmail:email});
-      meetingId.value = res.meeting_id;
-      mOut.textContent = 'Created: '+res.meeting_id+' (check your email for confirmation)';
+      mOut.textContent = 'Created meeting: '+res.meeting_id+' (check your email for confirmation)';
       alert('Meeting created');
     }catch(e){ alert(e.message); }
   };
-
-  async function submit(kind){
-    const mid=meetingId.value.trim(), file=document.getElementById('file').files[0], note=document.getElementById('note').value, email=document.getElementById('email').value.trim();
-    if(!mid) return alert('Enter a meeting ID'); if(!file) return alert('Choose a file');
-    try{
-      const file_b64 = await toB64(file);
-      await post({action:'submit_file_open', meeting_id:mid, type:kind, file_b64, mimeType:file.type||'application/octet-stream', fileName:file.name, note, submitterEmail:email});
-      alert(kind==='exhibit' ? 'Exhibit published' : 'Submitted for Clerk approval');
-    }catch(e){ alert(e.message); }
-  }
-
-  btnAgenda.onclick = ()=>submit('agenda');
-  btnPacket.onclick = ()=>submit('packet');
-  btnExhibit.onclick = ()=>submit('exhibit');
 </script>
 </body>
 </html>
