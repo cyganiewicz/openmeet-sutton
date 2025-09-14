@@ -5,81 +5,61 @@
   <title>OpenMeet – Your Meetings</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    .card{margin-bottom:12px}
+    .file{border:1px dashed #334155;border-radius:10px;padding:12px}
+  </style>
+  <script type="module">
+    import { WEBAPP_URL, initGoogle, getIdToken } from './js/auth.js';
+    const $=s=>document.querySelector(s);
+
+    async function jpost(o){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)}); const t=await r.text(); let j; try{j=JSON.parse(t);}catch{throw new Error('Bad JSON: '+t);} if(j.error) throw new Error(j.error); return j; }
+
+    let IDT=null;
+    async function boot(){
+      await initGoogle();
+      IDT = await getIdToken(true);
+      $('#who').textContent='Signed in';
+
+      const mine = await jpost({action:'my_meetings_secure', id_token:IDT});
+      const list = $('#list'); list.innerHTML='';
+      if (!mine.length){ list.innerHTML='<div class="muted">No meetings yet.</div>'; return; }
+
+      mine.forEach(m=>{
+        const el=document.createElement('div'); el.className='card';
+        el.innerHTML=`
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div><strong>${m.title||'Meeting'}</strong><div class="muted">${m.date||''} • ${m.location||''} • ${m.status||''}</div></div>
+            <a class="btn" href="./meeting.html?id=${m.meeting_id}">View public page</a>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+            <label class="file">Upload Packet PDF <input type="file" data-type="packet" data-mid="${m.meeting_id}" accept="application/pdf" style="display:block;margin-top:6px"></label>
+            <label class="file">Upload Exhibit <input type="file" data-type="exhibit" data-mid="${m.meeting_id}" style="display:block;margin-top:6px"></label>
+          </div>`;
+        list.appendChild(el);
+      });
+
+      list.addEventListener('change', async e=>{
+        const inp = e.target;
+        if (inp.type!=='file' || !inp.files[0]) return;
+        const type = inp.dataset.type;
+        const meeting_id = inp.dataset.mid;
+        const file = inp.files[0];
+        const b64 = await file.arrayBuffer().then(b=>btoa(String.fromCharCode(...new Uint8Array(b))));
+        try{
+          await jpost({action:'submit_file_open', meeting_id, type, file_b64:b64, fileName:file.name, mimeType:file.type, submitterEmail:'self'});
+          alert((type==='packet'?'Packet':'Exhibit')+' uploaded.');
+        }catch(err){ alert(err.message); }
+      });
+    }
+    boot().catch(e=>{ console.error(e); alert('Sign-in required'); });
+  </script>
 </head>
 <body>
-<div class="wrap">
-  <a class="btn" href="./">← Home</a>
-  <h2>Your Meetings</h2>
-  <div id="signin"></div>
-
-  <div id="app" style="display:none">
-    <div id="list"></div>
+  <div class="wrap">
+    <h2>Your Meetings</h2>
+    <div id="who" class="muted">Loading sign-in…</div>
+    <div id="list" style="margin-top:12px"></div>
   </div>
-</div>
-
-<script type="module">
-  import { renderSignIn, WEBAPP_URL, getToken } from './js/auth.js';
-
-  const app = document.getElementById('app');
-  const list = document.getElementById('list');
-
-  function start(){
-    app.style.display='block';
-    build().catch(e=> list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`);
-  }
-  renderSignIn('signin', start);
-  if (getToken()) setTimeout(start, 50);
-
-  async function post(body){
-    // Public secure endpoint: still send id_token but no staff domain required
-    const id_token = getToken(); if (!id_token) throw new Error('Sign in first');
-    const r = await fetch(WEBAPP_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ id_token, ...body })});
-    const t = await r.text(); let out; try{ out=JSON.parse(t);}catch{ throw new Error('Bad JSON: '+t.slice(0,200)); }
-    if (out.error) throw new Error(out.error); return out;
-  }
-  async function j(u){ const r=await fetch(u); if(!r.ok) throw new Error('Failed '+r.status); return r.json(); }
-  function toB64(file){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result.split(',')[1]); fr.readAsDataURL(file); }); }
-
-  async function build(){
-    list.innerHTML = '<div class="card">Loading…</div>';
-    const res = await post({ action:'my_meetings_secure' });
-    list.innerHTML = '';
-    if (!res.length){ list.innerHTML = '<div class="card">No meetings created by your account yet.</div>'; return; }
-
-    for (const m of res){
-      const card=document.createElement('div'); card.className='card';
-      card.innerHTML = `
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
-          <div>
-            <div style="font-size:18px;margin:6px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
-            <div class="muted">${m.location||''}</div>
-            <div class="muted" style="margin-top:6px">Status: ${m.status}</div>
-            <div style="margin-top:10px">
-              <label>Upload file</label> <input type="file" class="file">
-              <select class="kind"><option value="packet">Packet (auto)</option><option value="exhibit">Exhibit (auto)</option></select>
-              <input class="email" placeholder="your email (optional)">
-              <button class="btn upload">Upload</button>
-              <a class="btn" href="./agenda.html">Build Agenda</a>
-            </div>
-          </div>
-        </div>`;
-      card.querySelector('.upload').onclick = async ()=>{
-        const f = card.querySelector('.file').files[0]; if(!f) return alert('Choose a file');
-        const kind = card.querySelector('.kind').value;
-        const email = card.querySelector('.email').value.trim();
-        try{
-          const file_b64 = await toB64(f);
-          const out = await fetch(WEBAPP_URL,{ method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-            body: JSON.stringify({ action:'submit_file_open', meeting_id:m.meeting_id, type:kind, file_b64, mimeType:f.type||'application/octet-stream', fileName:f.name, submitterEmail:email }) });
-          const t = await out.text(); let o; try{o=JSON.parse(t);}catch{ throw new Error('Bad JSON: '+t.slice(0,200)); }
-          if (o.error) throw new Error(o.error);
-          alert(kind==='packet'?'Packet published':'Exhibit published');
-        }catch(e){ alert(e.message); }
-      };
-      list.appendChild(card);
-    }
-  }
-</script>
 </body>
 </html>
