@@ -5,13 +5,14 @@
   <title>OpenMeet – Admin</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
+  <!-- Keep GIS script; our code waits for it safely -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 <div class="wrap">
   <header style="display:flex;justify-content:space-between;align-items:center">
     <h1>Admin</h1>
-    <div id="signin"></div>
+    <div id="signin"><div class="muted">Loading sign-in…</div></div>
   </header>
 
   <div id="app" style="display:none">
@@ -25,50 +26,59 @@
   const app = document.getElementById('app');
   const list = document.getElementById('list');
 
-  renderSignIn('signin', async ()=>{
-    app.style.display='block';
-    try { await build(); }
-    catch (e) { list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`; }
-  });
-
-  // If the GIS script loads after our code, retry once when DOM is ready and token exists
-  if (getToken()) {
-    app.style.display='block';
-    // defer build slightly to allow GIS to initialize
-    setTimeout(async ()=>{ try { await build(); } catch(e){ list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`; } }, 50);
+  // Start UI either when user signs in OR if we already have a token from a prior session.
+  function startApp() {
+    app.style.display = 'block';
+    build().catch(e => {
+      list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`;
+    });
   }
 
-  async function j(u){ const r=await fetch(u); if(!r.ok) throw new Error('Failed to load: '+r.status); return r.json(); }
+  // Render the Google button and auto-start if token already present
+  renderSignIn('signin', startApp);
+  if (getToken()) {
+    // Give GIS a brief moment to initialize, then start
+    setTimeout(startApp, 50);
+  }
 
-  async function build(){
+  async function j(u) {
+    const r = await fetch(u);
+    if (!r.ok) throw new Error('Failed to load: ' + r.status);
+    return r.json();
+  }
+
+  async function build() {
     list.innerHTML = '<div class="card">Loading…</div>';
 
+    // Public data first (no auth needed)
     const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=50`);
 
-    // Try to load pending queue with auth
+    // Then try the secured queue
     let pending = [];
-    try { pending = await postSecure('admin_pending', {}); }
-    catch (e) {
-      // Session probably expired. Ask user to sign in again but still render meetings.
+    try {
+      pending = await postSecure('admin_pending', {});
+    } catch (e) {
+      // Token may be expired; ask to sign in but still show meetings
       promptSignIn();
       list.innerHTML = `<div class="card" style="border-color:#f66"><b>Sign-in needed:</b> ${e.message}</div>`;
     }
     const pendingByMid = pending.reduce((m,x)=>{ (m[x.meeting_id]=m[x.meeting_id]||[]).push(x); return m; }, {});
 
-    // Render meetings
-    for (const m of meetings){
+    // Render cards
+    for (const m of meetings) {
+      // Check for agenda presence (public files)
       let agenda = false;
       try {
         const fs = await j(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(m.meeting_id)}`);
-        agenda = fs.some(x=>x.type==='agenda');
-      } catch {/* ignore */}
+        agenda = fs.some(x => x.type === 'agenda');
+      } catch { /* ignore */ }
 
       const pend = pendingByMid[m.meeting_id] || [];
       const badges = [];
       if (!agenda) badges.push('<span class="badge">Needs agenda</span>');
       if (pend.length) badges.push(`<span class="badge">${pend.length} pending</span>`);
-      if (m.status==='awaiting-approval') badges.push('<span class="badge">Awaiting approval</span>');
-      if (m.status==='posted') badges.push('<span class="badge">Posted</span>');
+      if (m.status === 'awaiting-approval') badges.push('<span class="badge">Awaiting approval</span>');
+      if (m.status === 'posted') badges.push('<span class="badge">Posted</span>');
 
       const card = document.createElement('div'); card.className='card';
       card.innerHTML = `
@@ -83,7 +93,7 @@
             <a class="btn" href="./admin_edit.html?id=${encodeURIComponent(m.meeting_id)}">Edit</a>
           </div>
         </div>`;
-      // First real card clears "Loading…"
+
       if (list.firstChild && list.firstChild.textContent?.includes('Loading…')) list.innerHTML = '';
       list.appendChild(card);
     }
