@@ -11,30 +11,51 @@
   <a class="btn" href="./">← Home</a>
   <h2>Agenda Builder</h2>
 
+  <!-- Step 1: Board + meeting basics -->
   <div class="card">
-    <label>Meeting</label>
-    <select id="meetingSel"></select>
+    <h3>1) Board / Meeting Details</h3>
+    <label>Board / Committee</label>
+    <select id="board"></select>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+      <div><label>Date (YYYY-MM-DD)</label><input id="date" placeholder="2025-09-16"></div>
+      <div><label>Start Time (HH:MM)</label><input id="time" placeholder="18:00"></div>
+    </div>
+    <label>Title</label><input id="title" placeholder="Regular Meeting">
+    <label>Location</label><input id="location" placeholder="Town Hall, Room 1A">
+    <div class="muted" style="margin-top:6px">Tip: You can still upload packet items later from “Your Meetings”.</div>
   </div>
 
+  <!-- Step 2: Optional remote access blurb (Zoom etc.) -->
   <div class="card">
-    <h3>Agenda Items</h3>
+    <h3>2) Remote Access (optional)</h3>
+    <label>Zoom / Remote URL</label><input id="remote_url" placeholder="https://zoom.us/join">
+    <label>Phone</label><input id="remote_phone" placeholder="#1-929-205-6099 US (New York)">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><label>Meeting ID</label><input id="remote_id" placeholder="839 8717 1011"></div>
+      <div><label>Passcode</label><input id="remote_pass" placeholder="826597"></div>
+    </div>
+    <div class="muted" style="margin-top:6px">Leave blank if fully in-person.</div>
+  </div>
+
+  <!-- Step 3: Agenda items -->
+  <div class="card">
+    <h3>3) Agenda Items</h3>
     <div id="items"></div>
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="btn" id="add">Add item</button>
       <button class="btn" id="clear">Clear all</button>
     </div>
     <label style="margin-top:10px">Footer note (optional)</label>
-    <input id="footer" placeholder="e.g., Posted per OML on ...">
-    <label style="margin-top:10px">Your email (for confirmations)</label>
-    <input id="email" placeholder="you@example.com">
-    <div style="margin-top:10px">
-      <button class="btn" id="gen">Generate Agenda PDF (to Clerk)</button>
-    </div>
+    <input id="footer" placeholder="e.g., Posted per OML within 48 hours.">
   </div>
 
+  <!-- Step 4: Submit -->
   <div class="card">
-    <h3>Tips</h3>
-    <div class="muted">Use the up/down arrows to reorder, or delete to remove an item.</div>
+    <h3>4) Submit to Clerk</h3>
+    <label>Your email (for confirmation)</label><input id="email" placeholder="you@example.com">
+    <button class="btn" id="submit">Create meeting & send agenda to Clerk</button>
+    <div id="out" class="muted" style="margin-top:8px"></div>
   </div>
 </div>
 
@@ -48,11 +69,23 @@
     if (out.error) throw new Error(out.error); return out;
   }
 
-  const meetingSel = document.getElementById('meetingSel');
+  // Load boards for dropdown
+  const boardSel = document.getElementById('board');
+  try {
+    const boards = await j(`${WEBAPP_URL}?route=api/ui/boards`);
+    boardSel.innerHTML = (boards && boards.length)
+      ? '<option value="">Select a board/committee…</option>' +
+        boards.map(b=>`<option value="${b.board_id}">${b.name}</option>`).join('')
+      : '<option value="">No boards found</option>';
+  } catch {
+    boardSel.innerHTML = '<option value="">Could not load boards</option>';
+  }
+
+  // Item state + renderer
   const itemsRoot = document.getElementById('items');
   const state = { items: [] };
 
-  function render(){
+  function renderItems(){
     itemsRoot.innerHTML='';
     state.items.forEach((it, idx)=>{
       const row = document.createElement('div'); row.className='card';
@@ -60,9 +93,9 @@
         <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center">
           <div>
             <label>Title</label>
-            <input data-k="title" data-i="${idx}" value="${it.title||''}" placeholder="e.g., Approval of minutes">
+            <input data-k="title" data-i="${idx}" value="${it.title||''}" placeholder="e.g., Approval of Minutes">
             <label>Notes (optional)</label>
-            <input data-k="notes" data-i="${idx}" value="${it.notes||''}" placeholder="e.g., Minutes of Aug 3, 2025">
+            <input data-k="notes" data-i="${idx}" value="${it.notes||''}" placeholder="e.g., Minutes of Sep 2, 2025">
           </div>
           <div style="display:flex;flex-direction:column;gap:6px">
             <button class="btn" data-act="up" data-i="${idx}">↑</button>
@@ -78,34 +111,58 @@
     itemsRoot.querySelectorAll('button').forEach(btn=>{
       btn.onclick = (e)=>{
         const i=Number(e.target.dataset.i), act=e.target.dataset.act;
-        if (act==='up' && i>0){ const t=state.items[i-1]; state.items[i-1]=state.items[i]; state.items[i]=t; render(); }
-        if (act==='down' && i<state.items.length-1){ const t=state.items[i+1]; state.items[i+1]=state.items[i]; state.items[i]=t; render(); }
-        if (act==='del'){ state.items.splice(i,1); render(); }
+        if (act==='up' && i>0){ const t=state.items[i-1]; state.items[i-1]=state.items[i]; state.items[i]=t; renderItems(); }
+        if (act==='down' && i<state.items.length-1){ const t=state.items[i+1]; state.items[i+1]=state.items[i]; state.items[i]=t; renderItems(); }
+        if (act==='del'){ state.items.splice(i,1); renderItems(); }
       };
     });
   }
+  document.getElementById('add').onclick = ()=>{ state.items.push({title:'',notes:''}); renderItems(); };
+  document.getElementById('clear').onclick = ()=>{ if(confirm('Clear all items?')){ state.items=[]; renderItems(); } };
+  renderItems();
 
-  add.onclick = ()=>{ state.items.push({title:'',notes:''}); render(); };
-  clear.onclick = ()=>{ if(confirm('Clear all items?')){ state.items=[]; render(); } };
+  // Submit flow: create meeting → generate agenda PDF to Clerk queue
+  const out = document.getElementById('out');
+  document.getElementById('submit').onclick = async ()=>{
+    const board_id = boardSel.value;
+    const date = document.getElementById('date').value.trim();
+    const start_time = document.getElementById('time').value.trim();
+    const title = document.getElementById('title').value.trim() || 'Regular Meeting';
+    const location = document.getElementById('location').value.trim();
+    const submitterEmail = document.getElementById('email').value.trim();
 
-  // Load next 30 meetings for convenience
-  try{
-    const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=30`);
-    meetingSel.innerHTML = '<option value="">Select a meeting…</option>' + meetings.map(m=>`<option value="${m.meeting_id}">${m.date} — ${m.board_name||''} — ${m.title||''}</option>`).join('');
-  }catch{ meetingSel.innerHTML = '<option value="">Could not load meetings</option>'; }
+    if (!board_id) return alert('Choose a board');
+    if (!date) return alert('Enter a date');
+    if (state.items.length === 0) return alert('Add at least one agenda item');
 
-  gen.onclick = async ()=>{
-    const mid = meetingSel.value; const email = document.getElementById('email').value.trim();
-    if (!mid) return alert('Choose a meeting');
-    if (state.items.length===0) return alert('Add at least one agenda item');
-    try{
-      await post({ action:'create_agenda_from_form', meeting_id: mid, items: state.items, footerNote: document.getElementById('footer').value, submitterEmail: email });
-      alert('Agenda submitted to Clerk for approval');
-      state.items = []; render();
-    }catch(e){ alert(e.message); }
+    try {
+      // 1) Create the meeting shell
+      const created = await post({ action:'create_meeting_open', board_id, date, start_time, title, location, submitterEmail });
+
+      // 2) Build agenda PDF into Drafts for Clerk approval
+      const payload = {
+        action:'create_agenda_from_form',
+        meeting_id: created.meeting_id,
+        items: state.items,
+        footerNote: document.getElementById('footer').value,
+        submitterEmail,
+        // optional remote access block
+        remote: {
+          url: document.getElementById('remote_url').value,
+          phone: document.getElementById('remote_phone').value,
+          id: document.getElementById('remote_id').value,
+          pass: document.getElementById('remote_pass').value
+        }
+      };
+      await post(payload);
+
+      out.textContent = 'Agenda submitted to Clerk. You’ll get a confirmation email.';
+      alert('Agenda sent to Clerk for approval/posting.');
+      state.items=[]; renderItems();
+    } catch (e) {
+      alert(e.message);
+    }
   };
-
-  render();
 </script>
 </body>
 </html>
