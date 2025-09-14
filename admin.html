@@ -20,19 +20,23 @@
 </div>
 
 <script type="module">
-  import { renderSignIn, postSecure, WEBAPP_URL } from './js/auth.js';
+  import { renderSignIn, postSecure, WEBAPP_URL, getToken, promptSignIn } from './js/auth.js';
 
   const app = document.getElementById('app');
   const list = document.getElementById('list');
 
   renderSignIn('signin', async ()=>{
     app.style.display='block';
-    try {
-      await build();
-    } catch (e) {
-      list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`;
-    }
+    try { await build(); }
+    catch (e) { list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`; }
   });
+
+  // If the GIS script loads after our code, retry once when DOM is ready and token exists
+  if (getToken()) {
+    app.style.display='block';
+    // defer build slightly to allow GIS to initialize
+    setTimeout(async ()=>{ try { await build(); } catch(e){ list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`; } }, 50);
+  }
 
   async function j(u){ const r=await fetch(u); if(!r.ok) throw new Error('Failed to load: '+r.status); return r.json(); }
 
@@ -41,18 +45,18 @@
 
     const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=50`);
 
-    // Attempt to load pending queue; if it fails we still show meetings
+    // Try to load pending queue with auth
     let pending = [];
     try { pending = await postSecure('admin_pending', {}); }
     catch (e) {
-      // Show a visible warning, but continue
-      list.innerHTML = `<div class="card" style="border-color:#f66"><b>Admin API warning:</b> ${e.message}</div>`;
+      // Session probably expired. Ask user to sign in again but still render meetings.
+      promptSignIn();
+      list.innerHTML = `<div class="card" style="border-color:#f66"><b>Sign-in needed:</b> ${e.message}</div>`;
     }
     const pendingByMid = pending.reduce((m,x)=>{ (m[x.meeting_id]=m[x.meeting_id]||[]).push(x); return m; }, {});
 
     // Render meetings
     for (const m of meetings){
-      // Check if agenda exists
       let agenda = false;
       try {
         const fs = await j(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(m.meeting_id)}`);
@@ -79,13 +83,9 @@
             <a class="btn" href="./admin_edit.html?id=${encodeURIComponent(m.meeting_id)}">Edit</a>
           </div>
         </div>`;
-      // Append card below any warning message
-      if (list.firstChild && list.firstChild.textContent?.includes('Admin API warning')) {
-        list.appendChild(card);
-      } else {
-        list.innerHTML = ''; // first real card clears "Loading…"
-        list.appendChild(card);
-      }
+      // First real card clears "Loading…"
+      if (list.firstChild && list.firstChild.textContent?.includes('Loading…')) list.innerHTML = '';
+      list.appendChild(card);
     }
 
     if (!meetings.length) {
