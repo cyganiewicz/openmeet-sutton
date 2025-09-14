@@ -9,69 +9,71 @@
     .toolbar{display:flex;align-items:center;gap:12px;justify-content:space-between}
     .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
     .kpi{padding:12px;border-radius:12px;background:#0f172a;color:#fff}
-    .row{background:#0b1020;color:#e5e7eb;border-radius:12px;padding:12px;display:grid;grid-template-columns:180px 1fr 320px;gap:12px;align-items:center}
+    .row{background:#0b1020;color:#e5e7eb;border-radius:12px;padding:12px;display:grid;grid-template-columns:180px 1fr 340px;gap:12px;align-items:center}
     .pill{padding:4px 8px;border-radius:999px;background:#1f2937;color:#ddd;font-size:12px}
     .btn-ghost{background:transparent;border:1px solid #334155}
-    dialog{max-width:720px;width:96%;border:0;border-radius:12px;padding:0;overflow:hidden}
+    dialog{max-width:760px;width:96%;border:0;border-radius:12px;padding:0;overflow:hidden}
     .dlg-head{background:#0f172a;color:#fff;padding:12px 16px}
     .dlg-body{padding:16px}
     .item{padding:8px 12px;border:1px solid #e5e7eb;border-radius:10px;margin:6px 0}
     .muted{opacity:.8}
+    .toast{position:fixed;right:12px;bottom:12px;background:#0f172a;color:#fff;padding:10px 14px;border-radius:10px}
   </style>
   <script type="module">
-    // Cache-bust auth.js to avoid stale exports on GitHub Pages
-    const v = '3.0.0'; // must match AUTH_JS_VERSION
-    import * as Auth from './js/auth.js?v=3.0.0';
+    import * as Auth from './js/auth.js?v=3.0.1';
 
     const $ = (s, r=document)=>r.querySelector(s);
     const $$= (s, r=document)=>Array.from(r.querySelectorAll(s));
-
-    // Defensive: verify the named exports exist
-    if (!Auth || typeof Auth.getIdToken!=='function' || typeof Auth.initGoogle!=='function'){
-      console.error('auth.js exports missing. Fallback to window.OpenMeetAuth…');
-    }
-
-    const WEBAPP_URL = (Auth.WEBAPP_URL || (window.OpenMeetAuth && window.OpenMeetAuth.WEBAPP_URL));
+    const WEBAPP_URL = Auth.WEBAPP_URL;
     let IDT = null;
 
-    async function jget(u){ const r=await fetch(u); const t=await r.text(); let j; try{ j=JSON.parse(t); }catch{ throw new Error('Bad JSON: '+t); } if(j.error) throw new Error(j.error); return j; }
-    async function jpost(o){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)}); const t=await r.text(); let j; try{ j=JSON.parse(t); }catch{ throw new Error('Bad JSON: '+t); } if(j.error) throw new Error(j.error); return j; }
-
+    function toast(msg, t=2200){
+      const d=document.createElement('div'); d.className='toast'; d.textContent=msg; document.body.appendChild(d);
+      setTimeout(()=>d.remove(), t);
+    }
+    async function jget(u){
+      const r=await fetch(u); const t=await r.text(); let j;
+      try{ j=JSON.parse(t); }catch{ throw new Error('Bad JSON: '+t); }
+      if (j.error) throw new Error(j.error); return j;
+    }
+    async function jpost(o){
+      const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)});
+      const t=await r.text(); let j;
+      try{ j=JSON.parse(t); }catch{ throw new Error('Bad JSON: '+t); }
+      if (j.error) throw new Error(j.error); return j;
+    }
     function dedupeBy(arr, key){ const seen=new Set(), out=[]; for(const x of arr){ const k=x[key]; if(!seen.has(k)){ seen.add(k); out.push(x); } } return out; }
 
-    async function requireSignIn(){
-      try{
-        if (Auth && Auth.initGoogle) await Auth.initGoogle(); else if (window.OpenMeetAuth) await window.OpenMeetAuth.initGoogle();
-        const fn = (Auth && Auth.getIdToken) ? Auth.getIdToken : (window.OpenMeetAuth && window.OpenMeetAuth.getIdToken);
-        if (!fn) throw new Error('getIdToken missing');
-        IDT = await fn(true); // force prompt first time
-        $('#who').textContent = 'Signed in';
-      }catch(e){
-        console.error(e);
-        $('#who').textContent = 'Sign-in required';
-        throw e;
+    async function ensureSignIn(){
+      await Auth.initGoogle();
+      IDT = Auth.peekIdToken();
+      if (!IDT){
+        try{
+          IDT = await Auth.getIdToken(false); // prompt only if needed
+        }catch{
+          $('#who').textContent='Sign-in required'; throw new Error('Sign-in required');
+        }
       }
+      $('#who').textContent='Signed in';
     }
 
     async function loadQueue(){
       const pending = await jpost({action:'admin_pending', id_token:IDT});
-      const upcoming = await jget(`${WEBAPP_URL}?route=api/public/meetings&limit=200`);
-      const byId = {}; dedupeBy(upcoming,'meeting_id').forEach(m => byId[m.meeting_id]=m);
+      const upcoming = await jget(`${WEBAPP_URL}?route=api/public/meetings&limit=300`);
+      const byId={}; dedupeBy(upcoming,'meeting_id').forEach(m=>byId[m.meeting_id]=m);
 
       $('#kpiPending').textContent = String(pending.length);
       $('#kpiMeetings').textContent = String(Object.keys(byId).length);
 
-      const list = $('#rows'); list.innerHTML='';
-      const queueByMeeting = {};
-      pending.forEach(p => { (queueByMeeting[p.meeting_id] ||= []).push(p); });
+      const list=$('#rows'); list.innerHTML='';
+      const byMeeting={}; pending.forEach(p => { (byMeeting[p.meeting_id] ||= []).push(p); });
 
-      for (const [mid, items] of Object.entries(queueByMeeting)){
-        const m = byId[mid] || {title:'(Draft)', date:'', board_name:'', status:'awaiting-approval'};
-        const row = document.createElement('div');
-        row.className='row';
-        row.innerHTML = `
+      for (const [mid, items] of Object.entries(byMeeting)){
+        const m=byId[mid] || {title:'(Draft)', date:'', board_name:'', status:'awaiting-approval'};
+        const row=document.createElement('div'); row.className='row';
+        row.innerHTML=`
           <div>
-            <div style="font-weight:700">${m.board_name||'(Board)'} </div>
+            <div style="font-weight:700">${m.board_name||'(Board)'}</div>
             <div class="muted">${m.date||''} ${m.start_time||''}</div>
           </div>
           <div>
@@ -89,44 +91,67 @@
         list.appendChild(row);
       }
       if (!list.children.length){
-        const e = document.createElement('div');
-        e.className='muted'; e.textContent='No items awaiting approval.';
-        list.appendChild(e);
+        const e=document.createElement('div'); e.className='muted'; e.textContent='No items awaiting approval.'; list.appendChild(e);
       }
+
       $$('#rows [data-act="approve"]').forEach(b=>b.onclick=()=>approveAgenda(b.dataset.mid));
       $$('#rows [data-act="view"]').forEach(b=>b.onclick=()=>showAgenda(b.dataset.mid));
       $$('#rows [data-act="edit"]').forEach(b=>b.onclick=()=>openEditor(b.dataset.mid));
     }
 
     async function showAgenda(meeting_id){
-      const data = await jpost({action:'admin_get_agenda_json', id_token:IDT, meeting_id});
-      $('#dlgTitle').textContent = 'Agenda items ('+meeting_id+')';
-      const box = $('#agendaItems'); box.innerHTML='';
-      if (!data.items || !data.items.length){ box.innerHTML='<div class="muted">No items captured from builder.</div>'; }
-      else data.items.forEach((it, i)=>{
-        const div = document.createElement('div'); div.className='item';
-        div.innerHTML = `<div style="font-weight:700">${i+1}. ${it.title||'Item'}</div><div class="muted">${it.notes||''}</div>`;
-        box.appendChild(div);
-      });
-      $('#agendaMeta').textContent = (data.footer_note||'') + (data.remote && (data.remote.url||data.remote.phone) ? ' • Remote info provided' : '');
-      $('#dlg').showModal();
+      try{
+        const data = await jpost({action:'admin_get_agenda_json', id_token:IDT, meeting_id});
+        const box=$('#agendaItems'); box.innerHTML='';
+        $('#dlgTitle').textContent='Agenda items ('+meeting_id+')';
+        if (!data.items || !data.items.length){
+          box.innerHTML = '<div class="muted">No items captured from builder. If this is unexpected, make sure your backend calls <code>saveAgendaJson_()</code> inside <code>create_agenda_from_form</code>.</div>';
+        } else {
+          data.items.forEach((it,i)=>{
+            const div=document.createElement('div'); div.className='item';
+            div.innerHTML=`<div style="font-weight:700">${i+1}. ${it.title||'Item'}</div><div class="muted">${it.notes||''}</div>`;
+            box.appendChild(div);
+          });
+        }
+        $('#agendaMeta').textContent = (data.footer_note||'') + (data.remote && (data.remote.url||data.remote.phone) ? ' • Remote info provided' : '');
+        $('#dlg').showModal();
+      }catch(e){
+        console.error(e); alert('Could not load agenda JSON: '+e.message);
+      }
     }
     $('#closeDlg')?.addEventListener('click', ()=>$('#dlg').close());
 
     async function approveAgenda(meeting_id){
-      const pending = await jpost({action:'admin_pending', id_token:IDT});
-      const row = pending.find(x=>x.meeting_id===meeting_id && x.type==='agenda');
-      if (!row){ alert('No agenda awaiting approval for this meeting.'); return; }
-      const res = await jpost({action:'admin_approve', id_token:IDT, row_id: row.row_id});
-      alert('Agenda approved & published.\n\n'+(res.publicLink||''));
-      await loadQueue();
+      try{
+        const pending = await jpost({action:'admin_pending', id_token:IDT});
+        // Type is stored lowercase in backend: 'agenda'
+        const row = pending.find(x=>x.meeting_id===meeting_id && String(x.type).toLowerCase()==='agenda');
+        if (!row){ alert('No agenda awaiting approval for this meeting.'); return; }
+        const res = await jpost({action:'admin_approve', id_token:IDT, row_id: row.row_id});
+        toast('Agenda approved & published');
+        // Optional: open the public link
+        // if (res.publicLink) window.open(res.publicLink, '_blank');
+        await loadQueue();
+      }catch(e){
+        console.error(e);
+        alert('Approve failed: '+e.message);
+      }
     }
-    function openEditor(meeting_id){ location.href = `./admin_edit.html?id=${encodeURIComponent(meeting_id)}`; }
+
+    function openEditor(meeting_id){
+      // Carry the token via session storage; editor will call peekIdToken()
+      location.href = `./admin_edit.html?id=${encodeURIComponent(meeting_id)}`;
+    }
 
     (async function(){
-      await requireSignIn();
-      await loadQueue();
-    })().catch(e=>{ console.error(e); alert('Sign-in required for Clerk/Admin.'); });
+      try{
+        await ensureSignIn();
+        await loadQueue();
+      }catch(e){
+        console.error(e);
+        alert('Sign-in required for Clerk/Admin.');
+      }
+    })();
   </script>
 </head>
 <body>
