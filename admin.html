@@ -9,7 +9,6 @@
     .toolbar{display:flex;align-items:center;gap:12px;justify-content:space-between}
     .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
     .kpi{padding:12px;border-radius:12px;background:#0f172a;color:#fff}
-    .table{width:100%;border-collapse:separate;border-spacing:0 8px}
     .row{background:#0b1020;color:#e5e7eb;border-radius:12px;padding:12px;display:grid;grid-template-columns:180px 1fr 320px;gap:12px;align-items:center}
     .pill{padding:4px 8px;border-radius:999px;background:#1f2937;color:#ddd;font-size:12px}
     .btn-ghost{background:transparent;border:1px solid #334155}
@@ -20,44 +19,51 @@
     .muted{opacity:.8}
   </style>
   <script type="module">
-    import { WEBAPP_URL, initGoogle, getIdToken } from './js/auth.js';
+    // Cache-bust auth.js to avoid stale exports on GitHub Pages
+    const v = '3.0.0'; // must match AUTH_JS_VERSION
+    import * as Auth from './js/auth.js?v='+encodeURIComponent(v);
 
     const $ = (s, r=document)=>r.querySelector(s);
     const $$= (s, r=document)=>Array.from(r.querySelectorAll(s));
 
-    async function jget(u){ const r=await fetch(u); const t=await r.text(); try{const j=JSON.parse(t); if(j.error) throw new Error(j.error); return j;}catch(e){throw new Error('Bad JSON: '+t);} }
-    async function jpost(o){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)}); const t=await r.text(); try{const j=JSON.parse(t); if(j.error) throw new Error(j.error); return j;}catch(e){throw new Error('Bad JSON: '+t);} }
-
-    let IDT = null;
-    async function requireSignIn(){
-      await initGoogle();
-      IDT = await getIdToken(true); // force prompt if needed
-      $('#who').textContent = 'Signed in';
+    // Defensive: verify the named exports exist
+    if (!Auth || typeof Auth.getIdToken!=='function' || typeof Auth.initGoogle!=='function'){
+      console.error('auth.js exports missing. Fallback to window.OpenMeetAuth…');
     }
 
-    function dedupeBy(arr, key){
-      const seen=new Set(), out=[];
-      for(const x of arr){ const k=x[key]; if(!seen.has(k)){ seen.add(k); out.push(x); } }
-      return out;
+    const WEBAPP_URL = (Auth.WEBAPP_URL || (window.OpenMeetAuth && window.OpenMeetAuth.WEBAPP_URL));
+    let IDT = null;
+
+    async function jget(u){ const r=await fetch(u); const t=await r.text(); let j; try{ j=JSON.parse(t); }catch{ throw new Error('Bad JSON: '+t); } if(j.error) throw new Error(j.error); return j; }
+    async function jpost(o){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)}); const t=await r.text(); let j; try{ j=JSON.parse(t); }catch{ throw new Error('Bad JSON: '+t); } if(j.error) throw new Error(j.error); return j; }
+
+    function dedupeBy(arr, key){ const seen=new Set(), out=[]; for(const x of arr){ const k=x[key]; if(!seen.has(k)){ seen.add(k); out.push(x); } } return out; }
+
+    async function requireSignIn(){
+      try{
+        if (Auth && Auth.initGoogle) await Auth.initGoogle(); else if (window.OpenMeetAuth) await window.OpenMeetAuth.initGoogle();
+        const fn = (Auth && Auth.getIdToken) ? Auth.getIdToken : (window.OpenMeetAuth && window.OpenMeetAuth.getIdToken);
+        if (!fn) throw new Error('getIdToken missing');
+        IDT = await fn(true); // force prompt first time
+        $('#who').textContent = 'Signed in';
+      }catch(e){
+        console.error(e);
+        $('#who').textContent = 'Sign-in required';
+        throw e;
+      }
     }
 
     async function loadQueue(){
       const pending = await jpost({action:'admin_pending', id_token:IDT});
-      // Also load near-term meetings to populate the main list (re-use public meetings)
       const upcoming = await jget(`${WEBAPP_URL}?route=api/public/meetings&limit=200`);
-      const byId = {};
-      dedupeBy(upcoming,'meeting_id').forEach(m => byId[m.meeting_id]=m);
+      const byId = {}; dedupeBy(upcoming,'meeting_id').forEach(m => byId[m.meeting_id]=m);
 
-      // KPI
       $('#kpiPending').textContent = String(pending.length);
       $('#kpiMeetings').textContent = String(Object.keys(byId).length);
 
-      // Render rows
       const list = $('#rows'); list.innerHTML='';
       const queueByMeeting = {};
-      pending.forEach(p => {
-        (queueByMeeting[p.meeting_id] ||= []).push(p);
-      });
+      pending.forEach(p => { (queueByMeeting[p.meeting_id] ||= []).push(p); });
 
       for (const [mid, items] of Object.entries(queueByMeeting)){
         const m = byId[mid] || {title:'(Draft)', date:'', board_name:'', status:'awaiting-approval'};
@@ -82,14 +88,11 @@
           </div>`;
         list.appendChild(row);
       }
-
       if (!list.children.length){
         const e = document.createElement('div');
         e.className='muted'; e.textContent='No items awaiting approval.';
         list.appendChild(e);
       }
-
-      // Wire actions
       $$('#rows [data-act="approve"]').forEach(b=>b.onclick=()=>approveAgenda(b.dataset.mid));
       $$('#rows [data-act="view"]').forEach(b=>b.onclick=()=>showAgenda(b.dataset.mid));
       $$('#rows [data-act="edit"]').forEach(b=>b.onclick=()=>openEditor(b.dataset.mid));
@@ -111,7 +114,6 @@
     $('#closeDlg')?.addEventListener('click', ()=>$('#dlg').close());
 
     async function approveAgenda(meeting_id){
-      // find the pending AGENDA row_id for this meeting
       const pending = await jpost({action:'admin_pending', id_token:IDT});
       const row = pending.find(x=>x.meeting_id===meeting_id && x.type==='agenda');
       if (!row){ alert('No agenda awaiting approval for this meeting.'); return; }
@@ -119,22 +121,12 @@
       alert('Agenda approved & published.\n\n'+(res.publicLink||''));
       await loadQueue();
     }
+    function openEditor(meeting_id){ location.href = `./admin_edit.html?id=${encodeURIComponent(meeting_id)}`; }
 
-    function openEditor(meeting_id){
-      // Deep link to your existing edit page if you have one; fallback to drive
-      location.href = `./admin_edit.html?id=${encodeURIComponent(meeting_id)}`;
-    }
-
-    // Boot
     (async function(){
-      try{
-        await requireSignIn();
-        await loadQueue();
-      }catch(e){
-        console.error(e);
-        alert('Sign-in required for Clerk/Admin.');
-      }
-    })();
+      await requireSignIn();
+      await loadQueue();
+    })().catch(e=>{ console.error(e); alert('Sign-in required for Clerk/Admin.'); });
   </script>
 </head>
 <body>
