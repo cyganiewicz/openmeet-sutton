@@ -5,46 +5,89 @@
   <title>OpenMeet – Town of Sutton</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
-    .badge{font-size:12px;border-radius:999px;padding:4px 8px;background:#0b1020;color:#d1d5db}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}}
+    .card{padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}
+    .muted{opacity:.8}
+    .row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px;border-bottom:1px dashed #e5e7eb}
+    .row:last-child{border-bottom:0}
+    .files{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+    .pill{padding:4px 8px;border-radius:999px;border:1px solid #e5e7eb;background:#f8fafc}
   </style>
   <script type="module">
-    import { WEBAPP_URL } from './js/auth.js';
-    const $=s=>document.querySelector(s);
-    async function jget(u){ const r=await fetch(u); const j=await r.json(); if(j.error) throw new Error(j.error); return j; }
-    (async function(){
-      const meetings = await jget(`${WEBAPP_URL}?route=api/public/meetings&limit=200`);
-      const grid=$('#grid'); grid.innerHTML='';
-      meetings.forEach(m=>{
-        const el=document.createElement('a');
-        el.href = `./meeting.html?id=${m.meeting_id}`;
-        el.className='card';
-        el.innerHTML = `
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div class="badge">${(m.status||'').toUpperCase()}</div>
-            <div class="muted">${m.date||''} ${m.start_time||''}</div>
+    import * as Auth from './js/auth.js?v=3.0.2';
+    import { mountTopnav } from './js/topnav.js?v=2';
+
+    const $  = s=>document.querySelector(s);
+    const $$ = s=>Array.from(document.querySelectorAll(s));
+    const WEBAPP_URL = Auth.WEBAPP_URL;
+
+    async function jget(u){ const r=await fetch(u); const t=await r.text(); let j; try{ j=JSON.parse(t);}catch{throw new Error('Bad JSON: '+t);} if(j.error) throw new Error(j.error); return j; }
+
+    async function loadMeetings(){
+      const data = await jget(`${WEBAPP_URL}?route=api/public/meetings&limit=50`);
+      const list = $('#list'); list.innerHTML='';
+      if (!data.length){ list.innerHTML='<div class="muted">No upcoming meetings.</div>'; return; }
+
+      for (const m of data){
+        const row = document.createElement('div'); row.className='row';
+        row.innerHTML = `
+          <div>
+            <div style="font-weight:700">${m.board_name||'(Board)'}</div>
+            <div class="muted">${m.date||''} • ${m.start_time||''} • ${m.location||''}</div>
+            <div class="files" id="files-${m.meeting_id}"></div>
           </div>
-          <div style="margin-top:8px;font-size:18px;font-weight:800">${m.board_name||''}</div>
-          <div class="muted">${m.title||''}</div>
-          <div class="muted" style="margin-top:4px">${m.location||''}</div>`;
-        grid.appendChild(el);
-      });
-      if(!grid.children.length) grid.innerHTML='<div class="muted">No upcoming meetings.</div>';
-    })().catch(e=>{ console.error(e); alert('Failed to load'); });
+          <div style="display:flex;gap:8px;align-items:center">
+            <a class="btn" href="./meeting.html?id=${m.meeting_id}">Details</a>
+          </div>`;
+        list.appendChild(row);
+
+        // load public files for quick badges
+        try{
+          const files = await jget(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(m.meeting_id)}`);
+          const box = document.getElementById(`files-${m.meeting_id}`);
+          files.forEach(f=>{
+            const a = document.createElement('a');
+            a.className='pill'; a.href=f.url; a.target='_blank'; a.rel='noopener';
+            a.textContent = f.label || (f.type||'').toUpperCase();
+            box.appendChild(a);
+          });
+        }catch{}
+      }
+    }
+
+    (async function(){
+      await mountTopnav();
+      await loadMeetings();
+      // Big CTAs – no auth needed to click; auth happens on target pages if required
+      $('#ctaCreate').onclick = ()=>location.href='./create.html';
+      $('#ctaMy').onclick     = ()=>location.href='./my.html';
+    })();
   </script>
 </head>
 <body>
+  <div id="topnav"></div>
+
   <div class="wrap">
-    <header style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <h2 style="font-weight:900">OpenMeet — Town of Sutton</h2>
-      <nav style="display:flex;gap:8px">
-        <a class="btn" href="./create.html">Create Meeting</a>
-        <a class="btn" href="./my.html">Your Meetings</a>
-        <a class="btn" href="./admin.html">Clerk Console</a>
-      </nav>
-    </header>
-    <div id="grid" class="grid"></div>
+    <div class="grid">
+      <div class="card">
+        <h2>Upcoming Meetings</h2>
+        <div id="list" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <h2>Get things done</h2>
+        <p class="muted">Create a new meeting or update materials.</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
+          <button class="btn" id="ctaCreate">Create a meeting</button>
+          <button class="btn btn-ghost" id="ctaMy">Revise my meetings</button>
+          <a class="btn btn-ghost" href="./admin.html">Clerk Console</a>
+        </div>
+      </div>
+    </div>
   </div>
 </body>
 </html>
