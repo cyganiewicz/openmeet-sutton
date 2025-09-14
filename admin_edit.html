@@ -56,13 +56,12 @@
 </div>
 
 <script type="module">
-  import { renderSignIn, postSecure, WEBAPP_URL, getToken, promptSignIn } from './js/auth.js';
+  import { renderSignIn, postSecure, WEBAPP_URL, getToken, promptSignIn } from './js/auth.js?v=4';
   const mid = new URLSearchParams(location.search).get('id');
 
   const app = document.getElementById('app');
   const metaBox = document.getElementById('meta');
 
-  // Show app as soon as we have a token (persisted or fresh)
   function start() {
     app.style.display = 'block';
     loadAll().catch(e=>{
