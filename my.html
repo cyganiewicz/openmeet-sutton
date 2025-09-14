@@ -5,20 +5,22 @@
   <title>OpenMeet – Your Meetings</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
-  <style>
-    .card{margin-bottom:12px}
-    .file{border:1px dashed #334155;border-radius:10px;padding:12px}
-  </style>
+  <style>.card{margin-bottom:12px}.file{border:1px dashed #334155;border-radius:10px;padding:12px}</style>
   <script type="module">
-    import { WEBAPP_URL, initGoogle, getIdToken } from './js/auth.js';
-    const $=s=>document.querySelector(s);
+    const v='3.0.0';
+    import * as Auth from './js/auth.js?v='+encodeURIComponent(v);
 
-    async function jpost(o){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)}); const t=await r.text(); let j; try{j=JSON.parse(t);}catch{throw new Error('Bad JSON: '+t);} if(j.error) throw new Error(j.error); return j; }
-
+    const $ = s=>document.querySelector(s);
     let IDT=null;
+    const WEBAPP_URL = (Auth.WEBAPP_URL || (window.OpenMeetAuth && window.OpenMeetAuth.WEBAPP_URL));
+
+    async function jpost(o){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)}); const t=await r.text(); let j; try{ j=JSON.parse(t); }catch{ throw new Error('Bad JSON: '+t); } if(j.error) throw new Error(j.error); return j; }
+
     async function boot(){
-      await initGoogle();
-      IDT = await getIdToken(true);
+      if (Auth && Auth.initGoogle) await Auth.initGoogle(); else if (window.OpenMeetAuth) await window.OpenMeetAuth.initGoogle();
+      const fn = (Auth && Auth.getIdToken) ? Auth.getIdToken : (window.OpenMeetAuth && window.OpenMeetAuth.getIdToken);
+      if (!fn) throw new Error('getIdToken missing');
+      IDT = await fn(false);
       $('#who').textContent='Signed in';
 
       const mine = await jpost({action:'my_meetings_secure', id_token:IDT});
@@ -52,6 +54,7 @@
         }catch(err){ alert(err.message); }
       });
     }
+
     boot().catch(e=>{ console.error(e); alert('Sign-in required'); });
   </script>
 </head>
