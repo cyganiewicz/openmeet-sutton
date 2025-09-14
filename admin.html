@@ -5,11 +5,13 @@
   <title>OpenMeet – Clerk Console</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .wrap{max-width:1100px;margin:0 auto;padding:16px}
     .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px}
     .kpi{padding:12px;border-radius:12px;background:#0f172a;color:#fff}
-    .row{background:#0b1020;color:#e5e7eb;border-radius:12px;padding:12px;display:grid;grid-template-columns:180px 1fr 340px;gap:12px;align-items:center;margin:10px 0}
+    .row{background:#0b1020;color:#e5e7eb;border-radius:12px;padding:12px;display:grid;grid-template-columns:180px 1fr 360px;gap:12px;align-items:center;margin:10px 0}
     .pill{padding:4px 8px;border-radius:999px;background:#1f2937;color:#ddd;font-size:12px}
     .btn-ghost{background:transparent;border:1px solid #334155}
     .muted{opacity:.8}
@@ -19,17 +21,12 @@
     .item{padding:8px 12px;border:1px solid #e5e7eb;border-radius:10px;margin:6px 0}
     .toast{position:fixed;right:12px;bottom:12px;background:#0f172a;color:#fff;padding:10px 14px;border-radius:10px}
   </style>
-
-  <!-- Google Identity Services -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-
   <script type="module">
-    import * as Auth from './js/auth.js?v=3.0.1';
-    import { mountTopnav } from './js/topnav.js?v=1';
+    import * as Auth from './js/auth.js?v=3.0.2';
+    import { mountTopnav } from './js/topnav.js?v=2';
 
     const $  = (s, r=document)=>r.querySelector(s);
     const $$ = (s, r=document)=>Array.from(r.querySelectorAll(s));
-
     const WEBAPP_URL = Auth.WEBAPP_URL;
     let IDT = null;
 
@@ -53,9 +50,7 @@
     async function ensureSignIn(){
       await Auth.initGoogle();
       IDT = Auth.peekIdToken();
-      if (!IDT){
-        try{ IDT = await Auth.getIdToken(false); } catch{ throw new Error('Sign-in required'); }
-      }
+      if (!IDT) IDT = await Auth.getIdToken(false);
     }
 
     async function loadQueue(){
@@ -133,14 +128,14 @@
     function openEditor(meeting_id){ location.href = `./admin_edit.html?id=${encodeURIComponent(meeting_id)}`; }
 
     (async function(){
-      await mountTopnav();           // ⭐ renders Google button / status at top
-      await ensureSignIn();          // obtain IDT (cached or prompt)
+      await mountTopnav();           // polished header with Google button/status
+      await ensureSignIn();
       await loadQueue();
     })().catch(e=>{ console.error(e); alert('Sign-in required for Clerk/Admin.'); });
   </script>
 </head>
 <body>
-  <!-- Top nav with Google button/status -->
+  <!-- Top nav -->
   <div id="topnav"></div>
 
   <div class="wrap">
