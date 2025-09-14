@@ -2,170 +2,133 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>OpenMeet – Create Meeting & Agenda</title>
+  <title>OpenMeet – Create Meeting</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
-</head>
-<body>
-<div class="wrap">
-  <a class="btn" href="./">← Home</a>
-  <h2>Create a Meeting & Draft Agenda</h2>
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    .wrap{max-width:900px;margin:0 auto;padding:16px}
+    .card{padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;margin-bottom:16px}
+    .row{display:grid;grid-template-columns:180px 1fr;gap:12px;margin:8px 0}
+    .muted{opacity:.8}
+    .items .it{display:grid;grid-template-columns:1fr auto auto;gap:8px;margin:6px 0}
+    .btn-ghost{background:transparent;border:1px solid #cbd5e1}
+    input, select, textarea{width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px}
+  </style>
+  <script type="module">
+    import * as Auth from './js/auth.js?v=3.0.2';
+    import { mountTopnav } from './js/topnav.js?v=2';
 
-  <!-- Step 1: Board + meeting basics -->
-  <div class="card">
-    <h3>1) Board / Meeting Details</h3>
-    <label>Board / Committee</label>
-    <select id="boardSel"></select>
+    const $ = s=>document.querySelector(s);
+    const WEBAPP_URL = Auth.WEBAPP_URL;
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
-      <div><label>Date (YYYY-MM-DD)</label><input id="dateEl" placeholder="2025-09-16"></div>
-      <div><label>Start Time (HH:MM)</label><input id="timeEl" placeholder="18:00"></div>
-    </div>
-    <label>Title</label><input id="titleEl" placeholder="Regular Meeting">
-    <label>Location</label><input id="locationEl" placeholder="Town Hall, Room 1A">
-    <div class="muted" style="margin-top:6px">Tip: You can still add Packet items later from “Your Meetings”.</div>
-  </div>
+    async function jget(u){ const r=await fetch(u); const t=await r.text(); let j; try{ j=JSON.parse(t);}catch{throw new Error('Bad JSON: '+t);} if(j.error) throw new Error(j.error); return j; }
+    async function jpost(o){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)}); const t=await r.text(); let j; try{ j=JSON.parse(t);}catch{throw new Error('Bad JSON: '+t);} if(j.error) throw new Error(j.error); return j; }
 
-  <!-- Step 2: Optional remote access blurb -->
-  <div class="card">
-    <h3>2) Remote Access (optional)</h3>
-    <label>Zoom / Remote URL</label><input id="remoteUrlEl" placeholder="https://zoom.us/join">
-    <label>Phone</label><input id="remotePhoneEl" placeholder="#1-929-205-6099 US (New York)">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div><label>Meeting ID</label><input id="remoteIdEl" placeholder="839 8717 1011"></div>
-      <div><label>Passcode</label><input id="remotePassEl" placeholder="826597"></div>
-    </div>
-  </div>
+    function addItemRow(title='', notes=''){
+      const box = $('#items');
+      const div = document.createElement('div'); div.className='it';
+      div.innerHTML = `
+        <input placeholder="Agenda item title" value="${title.replace(/"/g,'&quot;')}">
+        <button class="btn btn-ghost" data-act="up">↑</button>
+        <button class="btn btn-ghost" data-act="del">✕</button>
+        <textarea placeholder="Notes (optional)" style="grid-column:1/-1;margin-top:6px">${notes||''}</textarea>
+      `;
+      box.appendChild(div);
+    }
 
-  <!-- Step 3: Agenda items -->
-  <div class="card">
-    <h3>3) Agenda Items</h3>
-    <div id="itemsRoot"></div>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="btn" id="btnAdd">Add item</button>
-      <button class="btn" id="btnClear">Clear all</button>
-    </div>
-    <label style="margin-top:10px">Footer note (optional)</label>
-    <input id="footerEl" placeholder="e.g., Posted per OML within 48 hours.">
-  </div>
+    (async function(){
+      await mountTopnav();
+      // Load boards
+      const boards = await jget(`${WEBAPP_URL}?route=api/ui/boards`);
+      const sel = $('#board'); sel.innerHTML = '<option value="">Select a board/committee…</option>';
+      boards.forEach(b => { const o=document.createElement('option'); o.value=b.board_id; o.textContent=b.name; sel.appendChild(o); });
 
-  <!-- Step 4: Submit -->
-  <div class="card">
-    <h3>4) Submit to Clerk</h3>
-    <label>Your email (for confirmation)</label><input id="emailEl" placeholder="you@example.com">
-    <button class="btn" id="btnSubmit">Create meeting & send agenda to Clerk</button>
-    <div id="out" class="muted" style="margin-top:8px"></div>
-  </div>
-</div>
-
-<script type="module">
-  import { WEBAPP_URL } from './js/auth.js';
-
-  async function GET(url){ const r=await fetch(url); if(!r.ok) throw new Error('GET '+r.status); return r.json(); }
-  async function POST(obj){
-    const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(obj)});
-    const t=await r.text(); let out; try{ out=JSON.parse(t);}catch{ throw new Error('Bad JSON: '+t.slice(0,200)); }
-    if (out.error) throw new Error(out.error); return out;
-  }
-
-  // Elements (avoid variable names like "date" that can collide)
-  const boardSel      = document.getElementById('boardSel');
-  const dateEl        = document.getElementById('dateEl');
-  const timeEl        = document.getElementById('timeEl');
-  const titleEl       = document.getElementById('titleEl');
-  const locationEl    = document.getElementById('locationEl');
-  const remoteUrlEl   = document.getElementById('remoteUrlEl');
-  const remotePhoneEl = document.getElementById('remotePhoneEl');
-  const remoteIdEl    = document.getElementById('remoteIdEl');
-  const remotePassEl  = document.getElementById('remotePassEl');
-  const footerEl      = document.getElementById('footerEl');
-  const emailEl       = document.getElementById('emailEl');
-  const outEl         = document.getElementById('out');
-
-  // Load boards
-  try {
-    const boards = await GET(`${WEBAPP_URL}?route=api/ui/boards`);
-    boardSel.innerHTML = boards.length
-      ? '<option value="">Select a board/committee…</option>' + boards.map(b=>`<option value="${b.board_id}">${b.name}</option>`).join('')
-      : '<option value="">No boards found</option>';
-  } catch {
-    boardSel.innerHTML = '<option value="">Could not load boards</option>';
-  }
-
-  // Agenda items state
-  const state = { items: [] };
-  const itemsRoot = document.getElementById('itemsRoot');
-
-  function renderItems(){
-    itemsRoot.innerHTML = '';
-    state.items.forEach((it, idx)=>{
-      const row = document.createElement('div'); row.className='card';
-      row.innerHTML = `
-        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center">
-          <div>
-            <label>Title</label>
-            <input data-k="title" data-i="${idx}" value="${it.title||''}" placeholder="e.g., Approval of Minutes">
-            <label>Notes (optional)</label>
-            <input data-k="notes" data-i="${idx}" value="${it.notes||''}" placeholder="e.g., Minutes of Sep 2, 2025">
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px">
-            <button class="btn" data-act="up" data-i="${idx}">↑</button>
-            <button class="btn" data-act="down" data-i="${idx}">↓</button>
-            <button class="btn" data-act="del" data-i="${idx}">✕</button>
-          </div>
-        </div>`;
-      itemsRoot.appendChild(row);
-    });
-    itemsRoot.querySelectorAll('input').forEach(inp=>{
-      inp.oninput = (e)=>{ const i=Number(e.target.dataset.i), k=e.target.dataset.k; state.items[i][k]=e.target.value; };
-    });
-    itemsRoot.querySelectorAll('button').forEach(btn=>{
-      btn.onclick = (e)=>{
-        const i=Number(e.target.dataset.i), act=e.target.dataset.act;
-        if (act==='up' && i>0){ const t=state.items[i-1]; state.items[i-1]=state.items[i]; state.items[i]=t; renderItems(); }
-        if (act==='down' && i<state.items.length-1){ const t=state.items[i+1]; state.items[i+1]=state.items[i]; state.items[i]=t; renderItems(); }
-        if (act==='del'){ state.items.splice(i,1); renderItems(); }
-      };
-    });
-  }
-  document.getElementById('btnAdd').onclick   = ()=>{ state.items.push({title:'',notes:''}); renderItems(); };
-  document.getElementById('btnClear').onclick = ()=>{ if(confirm('Clear all items?')){ state.items=[]; renderItems(); } };
-  renderItems();
-
-  // Submit: create meeting → generate agenda in Drafts → Clerk queue
-  document.getElementById('btnSubmit').onclick = async ()=>{
-    const board_id = boardSel.value;
-    const dVal     = dateEl.value.trim();
-    const tVal     = timeEl.value.trim();
-    const titleVal = titleEl.value.trim() || 'Regular Meeting';
-    const locVal   = locationEl.value.trim();
-    const emailVal = emailEl.value.trim();
-
-    if (!board_id) return alert('Choose a board');
-    if (!dVal)     return alert('Enter a date');
-    if (state.items.length === 0) return alert('Add at least one agenda item');
-
-    try {
-      // 1) Create meeting shell
-      const created = await POST({ action:'create_meeting_open', board_id, date:dVal, start_time:tVal, title:titleVal, location:locVal, submitterEmail:emailVal });
-
-      // 2) Send agenda for Clerk approval (Drafts)
-      await POST({
-        action:'create_agenda_from_form',
-        meeting_id: created.meeting_id,
-        items: state.items,
-        footerNote: footerEl.value,
-        submitterEmail: emailVal,
-        remote: { url: remoteUrlEl.value, phone: remotePhoneEl.value, id: remoteIdEl.value, pass: remotePassEl.value }
+      // Agenda builder basics
+      $('#addItem').onclick = ()=>addItemRow();
+      $('#items').addEventListener('click', e=>{
+        const btn=e.target.closest('button'); if(!btn) return;
+        const row=btn.closest('.it'); if(!row) return;
+        if (btn.dataset.act==='del'){ row.remove(); }
+        if (btn.dataset.act==='up'){ const prev=row.previousElementSibling; if(prev) row.parentNode.insertBefore(row, prev); }
       });
 
-      outEl.textContent = 'Agenda submitted to Clerk. You’ll get a confirmation email.';
-      alert('Agenda sent to Clerk for approval/posting.');
-      state.items=[]; renderItems();
-    } catch (e) {
-      alert(e.message);
-    }
-  };
-</script>
+      // one starter line
+      addItemRow('Call to Order','');
+
+      $('#create').onclick = async ()=>{
+        const board_id = $('#board').value;
+        const title    = $('#title').value.trim() || 'Regular Meeting';
+        const date     = $('#date').value;
+        const start    = $('#time').value;
+        const location = $('#location').value.trim();
+        const submitterEmail = (await (async ()=>{ try{ await Auth.initGoogle(); const t=Auth.peekIdToken()||await Auth.getIdToken(false); const p=JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); return p.email||''; }catch{return '';} })());
+
+        if (!board_id || !date){ alert('Please select a board and date.'); return; }
+
+        // 1) Create meeting shell
+        const created = await jpost({action:'create_meeting_open', board_id, title, date, start_time:start, location, submitterEmail});
+        const meeting_id = created.meeting_id;
+
+        // 2) Collect agenda items (optional but recommended)
+        const items = Array.from(document.querySelectorAll('#items .it')).map(div=>{
+          const [inpTitle, btnUp, btnDel, ta] = div.children;
+          return {title: inpTitle.value.trim(), notes: (ta.value||'').trim()};
+        }).filter(x=>x.title);
+
+        const footerNote = $('#footer').value.trim();
+        const remote = {
+          url: $('#remote_url').value.trim(),
+          phone: $('#remote_phone').value.trim(),
+          id: $('#remote_id').value.trim(),
+          pass: $('#remote_pass').value.trim()
+        };
+
+        if (items.length){
+          await jpost({action:'create_agenda_from_form', meeting_id, items, footerNote, remote, submitterEmail});
+          alert('Meeting created and agenda sent to Clerk for approval.');
+        } else {
+          alert('Meeting created. You can add materials later via “Your Meetings”.');
+        }
+        location.href = `./meeting.html?id=${encodeURIComponent(meeting_id)}`;
+      };
+    })().catch(e=>{ console.error(e); alert(e.message); });
+  </script>
+</head>
+<body>
+  <div id="topnav"></div>
+
+  <div class="wrap">
+    <h2>Create a Meeting</h2>
+    <div class="card">
+      <div class="row"><label>Board/Committee</label><select id="board"></select></div>
+      <div class="row"><label>Meeting title</label><input id="title" placeholder="e.g., Regular Meeting"></div>
+      <div class="row"><label>Date</label><input id="date" type="date"></div>
+      <div class="row"><label>Start time</label><input id="time" type="time"></div>
+      <div class="row"><label>Location</label><input id="location" placeholder="Town Hall, 3rd Floor, Room 310"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Agenda (optional)</h3>
+      <p class="muted">Quickly outline your agenda. The Clerk will receive it for posting/approval.</p>
+      <div id="items" class="items"></div>
+      <button class="btn btn-ghost" id="addItem" style="margin-top:8px">Add item</button>
+
+      <h4 style="margin-top:16px">Footer note</h4>
+      <textarea id="footer" placeholder="Standard notice and any additional information"></textarea>
+
+      <h4 style="margin-top:16px">Remote access (optional)</h4>
+      <div class="row"><label>Join URL</label><input id="remote_url" placeholder="https://meet.google.com/…"></div>
+      <div class="row"><label>Phone</label><input id="remote_phone" placeholder="(###) ###-####"></div>
+      <div class="row"><label>Meeting ID</label><input id="remote_id"></div>
+      <div class="row"><label>Passcode</label><input id="remote_pass"></div>
+    </div>
+
+    <div style="display:flex;gap:12px">
+      <button class="btn" id="create">Create meeting</button>
+      <a class="btn btn-ghost" href="./my.html">Revise my meetings</a>
+    </div>
+  </div>
 </body>
 </html>
