@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OpenMeet – Your Meetings</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="./assets/theme.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="wrap">
+  <a class="btn" href="./">← Home</a>
+  <h2>Your Meetings</h2>
+  <div id="signin"></div>
+
+  <div id="app" style="display:none">
+    <div id="list"></div>
+  </div>
+</div>
+
+<script type="module">
+  import { renderSignIn, WEBAPP_URL, getToken } from './js/auth.js';
+
+  const app = document.getElementById('app');
+  const list = document.getElementById('list');
+
+  function start(){
+    app.style.display='block';
+    build().catch(e=> list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`);
+  }
+  renderSignIn('signin', start);
+  if (getToken()) setTimeout(start, 50);
+
+  async function post(body){
+    // Public secure endpoint: still send id_token but no staff domain required
+    const id_token = getToken(); if (!id_token) throw new Error('Sign in first');
+    const r = await fetch(WEBAPP_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ id_token, ...body })});
+    const t = await r.text(); let out; try{ out=JSON.parse(t);}catch{ throw new Error('Bad JSON: '+t.slice(0,200)); }
+    if (out.error) throw new Error(out.error); return out;
+  }
+  async function j(u){ const r=await fetch(u); if(!r.ok) throw new Error('Failed '+r.status); return r.json(); }
+  function toB64(file){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result.split(',')[1]); fr.readAsDataURL(file); }); }
+
+  async function build(){
+    list.innerHTML = '<div class="card">Loading…</div>';
+    const res = await post({ action:'my_meetings_secure' });
+    list.innerHTML = '';
+    if (!res.length){ list.innerHTML = '<div class="card">No meetings created by your account yet.</div>'; return; }
+
+    for (const m of res){
+      const card=document.createElement('div'); card.className='card';
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+          <div>
+            <div style="font-size:18px;margin:6px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
+            <div class="muted">${m.location||''}</div>
+            <div class="muted" style="margin-top:6px">Status: ${m.status}</div>
+            <div style="margin-top:10px">
+              <label>Upload file</label> <input type="file" class="file">
+              <select class="kind"><option value="packet">Packet (auto)</option><option value="exhibit">Exhibit (auto)</option></select>
+              <input class="email" placeholder="your email (optional)">
+              <button class="btn upload">Upload</button>
+              <a class="btn" href="./agenda.html">Build Agenda</a>
+            </div>
+          </div>
+        </div>`;
+      card.querySelector('.upload').onclick = async ()=>{
+        const f = card.querySelector('.file').files[0]; if(!f) return alert('Choose a file');
+        const kind = card.querySelector('.kind').value;
+        const email = card.querySelector('.email').value.trim();
+        try{
+          const file_b64 = await toB64(f);
+          const out = await fetch(WEBAPP_URL,{ method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+            body: JSON.stringify({ action:'submit_file_open', meeting_id:m.meeting_id, type:kind, file_b64, mimeType:f.type||'application/octet-stream', fileName:f.name, submitterEmail:email }) });
+          const t = await out.text(); let o; try{o=JSON.parse(t);}catch{ throw new Error('Bad JSON: '+t.slice(0,200)); }
+          if (o.error) throw new Error(o.error);
+          alert(kind==='packet'?'Packet published':'Exhibit published');
+        }catch(e){ alert(e.message); }
+      };
+      list.appendChild(card);
+    }
+  }
+</script>
+</body>
+</html>
