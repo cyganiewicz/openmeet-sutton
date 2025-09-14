@@ -2,50 +2,39 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>OpenMeet – Clerk Console</title>
+  <title>OpenMeet – Clerk Inbox</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
-  <!-- Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .wrap{max-width:1100px;margin:0 auto;padding:16px}
-    .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px}
-    .kpi{padding:12px;border-radius:12px;background:#0f172a;color:#fff}
-    .row{background:#0b1020;color:#e5e7eb;border-radius:12px;padding:12px;display:grid;grid-template-columns:180px 1fr 360px;gap:12px;align-items:center;margin:10px 0}
-    .pill{padding:4px 8px;border-radius:999px;background:#1f2937;color:#ddd;font-size:12px}
-    .btn-ghost{background:transparent;border:1px solid #334155}
-    .muted{opacity:.8}
+    .toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:12px 0}
+    .search{flex:1;display:flex;gap:8px}
+    .search input{flex:1;padding:10px;border:1px solid #cbd5e1;border-radius:10px}
+    .inbox{border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
+    .row{display:grid;grid-template-columns:36px 1.3fr 1fr 1fr auto;gap:12px;align-items:center;border-bottom:1px dashed #eaecef;padding:10px 12px}
+    .row:last-child{border-bottom:0}
+    .who{font-weight:600}
+    .meta{color:#475569}
+    .badge{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #e5e7eb;background:#f8fafc;font-size:12px;margin-right:6px}
+    .pill{padding:4px 8px;border-radius:999px;background:#0f172a;color:#fff;font-size:12px}
     dialog{max-width:760px;width:96%;border:0;border-radius:12px;padding:0;overflow:hidden}
     .dlg-head{background:#0f172a;color:#fff;padding:12px 16px}
     .dlg-body{padding:16px}
     .item{padding:8px 12px;border:1px solid #e5e7eb;border-radius:10px;margin:6px 0}
-    .toast{position:fixed;right:12px;bottom:12px;background:#0f172a;color:#fff;padding:10px 14px;border-radius:10px}
+    .muted{opacity:.75}
   </style>
   <script type="module">
     import * as Auth from './js/auth.js?v=3.0.2';
-    import { mountTopnav } from './js/topnav.js?v=2';
+    import { mountTopnav } from './js/topnav.js?v=4';
 
     const $  = (s, r=document)=>r.querySelector(s);
     const $$ = (s, r=document)=>Array.from(r.querySelectorAll(s));
     const WEBAPP_URL = Auth.WEBAPP_URL;
-    let IDT = null;
+    let IDT = null, CACHE = {pending:[], meetingsById:{}};
 
-    function toast(msg, t=2200){
-      const d=document.createElement('div'); d.className='toast'; d.textContent=msg; document.body.appendChild(d);
-      setTimeout(()=>d.remove(), t);
-    }
-    async function jget(u){
-      const r=await fetch(u); const t=await r.text(); let j;
-      try{ j=JSON.parse(t); }catch{ throw new Error('Bad JSON: '+t); }
-      if (j.error) throw new Error(j.error); return j;
-    }
-    async function jpost(o){
-      const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)});
-      const t=await r.text(); let j;
-      try{ j=JSON.parse(t); }catch{ throw new Error('Bad JSON: '+t); }
-      if (j.error) throw new Error(j.error); return j;
-    }
-    function dedupeBy(arr, key){ const seen=new Set(), out=[]; for(const x of arr){ const k=x[key]; if(!seen.has(k)){ seen.add(k); out.push(x); } } return out; }
+    async function jget(u){ const r=await fetch(u); const t=await r.text(); let j; try{ j=JSON.parse(t);}catch{throw new Error('Bad JSON: '+t);} if(j.error) throw new Error(j.error); return j; }
+    async function jpost(o){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)}); const t=await r.text(); let j; try{ j=JSON.parse(t);}catch{throw new Error('Bad JSON: '+t);} if(j.error) throw new Error(j.error); return j; }
 
     async function ensureSignIn(){
       await Auth.initGoogle();
@@ -53,53 +42,69 @@
       if (!IDT) IDT = await Auth.getIdToken(false);
     }
 
-    async function loadQueue(){
-      const pending = await jpost({action:'admin_pending', id_token:IDT});
-      const upcoming = await jget(`${WEBAPP_URL}?route=api/public/meetings&limit=300`);
-      const byId={}; dedupeBy(upcoming,'meeting_id').forEach(m=>byId[m.meeting_id]=m);
+    function formatDateTime(d){ if(!d) return ''; try{ return new Date(d).toLocaleString(); }catch{return d;} }
 
-      $('#kpiPending').textContent = String(pending.length);
-      $('#kpiMeetings').textContent = String(Object.keys(byId).length);
+    function renderList(filter=''){
+      const list = $('#list');
+      list.innerHTML='';
+      const q = filter.trim().toLowerCase();
+      let rows = CACHE.pending.slice();
+      if (q){
+        rows = rows.filter(r =>
+          (r.board_name||'').toLowerCase().includes(q) ||
+          (r.meeting_title||'').toLowerCase().includes(q) ||
+          (r.submitted_by||'').toLowerCase().includes(q) ||
+          (r.type||'').toLowerCase().includes(q)
+        );
+      }
+      if (!rows.length){ list.innerHTML='<div class="muted" style="padding:14px">No action items.</div>'; return; }
 
-      const list=$('#rows'); list.innerHTML='';
-      const byMeeting={}; pending.forEach(p => { (byMeeting[p.meeting_id] ||= []).push(p); });
-
-      for (const [mid, items] of Object.entries(byMeeting)){
-        const m=byId[mid] || {title:'(Draft)', date:'', board_name:'', status:'awaiting-approval'};
-        const row=document.createElement('div'); row.className='row';
-        row.innerHTML=`
+      for (const r of rows){
+        const m = CACHE.meetingsById[r.meeting_id] || {};
+        const row = document.createElement('div'); row.className='row';
+        row.innerHTML = `
+          <div><input type="checkbox" class="pick" value="${r.row_id}"></div>
           <div>
-            <div style="font-weight:700">${m.board_name||'(Board)'}</div>
-            <div class="muted">${m.date||''} ${m.start_time||''}</div>
+            <div class="who">${r.board_name || '(Board)'} <span class="badge">${(r.type||'').toUpperCase()}</span></div>
+            <div class="meta">${r.meeting_title||'Meeting'} • ${m.date||r.meeting_date||''} ${m.start_time||''}</div>
           </div>
-          <div>
-            <div style="font-weight:600">${m.title||'Meeting'}</div>
-            <div class="muted">${m.location||''}</div>
-            <div style="margin-top:6px">${items.map(it=>`<span class="pill">${String(it.type||'').toUpperCase()}</span>`).join(' ')}</div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-            <button class="btn" data-act="view" data-mid="${mid}">View agenda items</button>
-            <button class="btn" data-act="approve" data-mid="${mid}">Approve agenda</button>
-            <a class="btn btn-ghost" target="_blank" href="https://drive.google.com/drive/folders/${m.public_folder_id||''}">Open Public</a>
-            <a class="btn btn-ghost" target="_blank" href="https://drive.google.com/drive/folders/${m.draft_folder_id||''}">Open Drafts</a>
-            <button class="btn btn-ghost" data-act="edit" data-mid="${mid}">Quick edit</button>
+          <div class="meta">${r.submitted_by||''}</div>
+          <div class="meta">${formatDateTime(r.submitted_at)||''}</div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" data-act="view" data-mid="${r.meeting_id}">View agenda items</button>
+            <button class="btn btn-ghost" data-act="edit" data-mid="${r.meeting_id}">Quick edit</button>
           </div>`;
         list.appendChild(row);
       }
-      if (!list.children.length){
-        const e=document.createElement('div'); e.className='muted'; e.textContent='No items awaiting approval.'; list.appendChild(e);
-      }
 
-      $$('#rows [data-act="approve"]').forEach(b=>b.onclick=()=>approveAgenda(b.dataset.mid));
-      $$('#rows [data-act="view"]').forEach(b=>b.onclick=()=>showAgenda(b.dataset.mid));
-      $$('#rows [data-act="edit"]').forEach(b=>b.onclick=()=>openEditor(b.dataset.mid));
+      // wire actions
+      $$('#list [data-act="view"]').forEach(b=>b.onclick=()=>showAgenda(b.dataset.mid));
+      $$('#list [data-act="edit"]').forEach(b=>b.onclick=()=>openEditor(b.dataset.mid));
+    }
+
+    async function loadData(){
+      const [pending, meetings] = await Promise.all([
+        jpost({action:'admin_pending', id_token:IDT}),
+        jget(`${WEBAPP_URL}?route=api/public/meetings&limit=500`)
+      ]);
+      // sort newest first by submitted_at (fallback: meeting_date)
+      pending.sort((a,b)=>{
+        const ad = a.submitted_at || a.meeting_date || '';
+        const bd = b.submitted_at || b.meeting_date || '';
+        return ad>bd ? -1 : ad<bd ? 1 : 0;
+      });
+      const map={}; meetings.forEach(m=>map[m.meeting_id]=m);
+      CACHE.pending = pending;
+      CACHE.meetingsById = map;
+      renderList($('#search').value||'');
+      $('#count').textContent = String(pending.length);
     }
 
     async function showAgenda(meeting_id){
       try{
         const data = await jpost({action:'admin_get_agenda_json', id_token:IDT, meeting_id});
         const box=$('#agendaItems'); box.innerHTML='';
-        $('#dlgTitle').textContent='Agenda items ('+meeting_id+')';
+        $('#dlgTitle').textContent='Agenda items';
         if (!data.items || !data.items.length){
           box.innerHTML = '<div class="muted">No items captured from builder for this meeting.</div>';
         } else {
@@ -115,41 +120,43 @@
     }
     $('#closeDlg')?.addEventListener('click', ()=>$('#dlg').close());
 
-    async function approveAgenda(meeting_id){
-      try{
-        const pending = await jpost({action:'admin_pending', id_token:IDT});
-        const row = pending.find(x=>x.meeting_id===meeting_id && String(x.type||'').toLowerCase()==='agenda');
-        if (!row){ alert('No agenda awaiting approval for this meeting.'); return; }
-        await jpost({action:'admin_approve', id_token:IDT, row_id: row.row_id});
-        toast('Agenda approved & published');
-        await loadQueue();
-      }catch(e){ console.error(e); alert('Approve failed: '+e.message); }
-    }
     function openEditor(meeting_id){ location.href = `./admin_edit.html?id=${encodeURIComponent(meeting_id)}`; }
 
+    async function approveSelected(){
+      const picks = $$('#list .pick:checked').map(cb=>cb.value);
+      if (!picks.length){ alert('Select at least one item.'); return; }
+      try{
+        await jpost({action:'admin_approve_batch', id_token:IDT, row_ids:picks});
+        await loadData();
+        alert('Approved '+picks.length+' item(s).');
+      }catch(e){ alert('Batch approve failed: '+e.message); }
+    }
+
     (async function(){
-      await mountTopnav();           // polished header with Google button/status
+      await mountTopnav();
       await ensureSignIn();
-      await loadQueue();
+
+      $('#search').addEventListener('input', ()=>renderList($('#search').value));
+      $('#approveSel').onclick = approveSelected;
+
+      await loadData();
     })().catch(e=>{ console.error(e); alert('Sign-in required for Clerk/Admin.'); });
   </script>
 </head>
 <body>
-  <!-- Top nav -->
   <div id="topnav"></div>
 
   <div class="wrap">
-    <h2>Clerk Console</h2>
-
-    <div class="kpis">
-      <div class="kpi"><div class="muted">Awaiting approval</div><div id="kpiPending" style="font-size:28px;font-weight:800">0</div></div>
-      <div class="kpi"><div class="muted">Meetings indexed</div><div id="kpiMeetings" style="font-size:28px;font-weight:800">0</div></div>
-      <div class="kpi"><div class="muted">Today</div><div style="font-size:28px;font-weight:800"><script>document.write(new Date().toLocaleDateString())</script></div></div>
-      <div class="kpi"><div class="muted">Domain</div><div style="font-size:28px;font-weight:800">town.sutton.ma.us</div></div>
+    <h2>Clerk Inbox</h2>
+    <div class="toolbar">
+      <div class="search">
+        <input id="search" placeholder="Search by board, title, submitter, or type…">
+      </div>
+      <button class="btn" id="approveSel">Approve selected</button>
+      <span class="muted">Items: <strong id="count">0</strong></span>
     </div>
 
-    <h3 style="margin-top:14px">Action Queue</h3>
-    <div id="rows"></div>
+    <div class="inbox" id="list"></div>
   </div>
 
   <dialog id="dlg">
