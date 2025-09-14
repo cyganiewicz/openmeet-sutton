@@ -5,34 +5,57 @@
   <title>OpenMeet – Meeting</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
+  <style>
+    .files{display:flex;flex-direction:column;gap:8px}
+    .item{padding:10px;border:1px solid #e5e7eb;border-radius:10px}
+    .num{font-weight:700}
+  </style>
+  <script type="module">
+    import { WEBAPP_URL } from './js/auth.js';
+    const $=s=>document.querySelector(s); const params=new URLSearchParams(location.search); const id=params.get('id');
+    async function jget(u){ const r=await fetch(u); const j=await r.json(); if(j.error) throw new Error(j.error); return j; }
+
+    (async function(){
+      const meta = await jget(`${WEBAPP_URL}?route=api/public/meeting&id=${encodeURIComponent(id)}`);
+      $('#title').textContent = meta.board_name+' — '+(meta.title||'Meeting');
+      $('#sub').textContent = `${meta.date||''} ${meta.start_time||''} • ${meta.location||''}`;
+
+      // Files
+      const files = await jget(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(id)}`);
+      const list = $('#files'); list.innerHTML='';
+      files.forEach(f=>{
+        const a=document.createElement('a'); a.href=f.url; a.target='_blank'; a.className='item';
+        a.innerHTML = `<div style="display:flex;justify-content:space-between"><div>${f.label||f.type}</div><div class="muted">${(f.approved_at||'').split('T')[0]}</div></div>`;
+        list.appendChild(a);
+      });
+      if(!list.children.length) list.innerHTML='<div class="muted">No materials posted yet.</div>';
+
+      // Agenda items (if available)
+      const aj = await jget(`${WEBAPP_URL}?route=api/public/agenda_json&meeting_id=${encodeURIComponent(id)}`).catch(()=>({items:[]}));
+      const ai = $('#agendaItems'); ai.innerHTML='';
+      if (aj.items && aj.items.length){
+        aj.items.forEach((it,i)=>{
+          const div=document.createElement('div'); div.className='item';
+          div.innerHTML = `<div class="num">${i+1}. ${it.title||'Item'}</div><div class="muted">${it.notes||''}</div>`;
+          ai.appendChild(div);
+        });
+      } else {
+        ai.innerHTML = '<div class="muted">Agenda outline not available.</div>';
+      }
+    })().catch(e=>{ console.error(e); alert('Failed to load meeting'); });
+  </script>
 </head>
 <body>
-<div class="wrap">
-  <a class="btn" href="./">← All meetings</a>
-  <div id="meta" class="card"></div>
-  <h3>Documents</h3>
-  <div id="files"></div>
-</div>
+  <div class="wrap">
+    <a class="btn" href="./">← All meetings</a>
+    <h2 id="title">Meeting</h2>
+    <div id="sub" class="muted" style="margin-bottom:12px"></div>
 
-<script type="module">
-  import { WEBAPP_URL } from './js/auth.js';
-  const id=new URLSearchParams(location.search).get('id');
-  async function j(u){ const r=await fetch(u); return r.json(); }
-  const m = await j(`${WEBAPP_URL}?route=api/public/meeting&id=${encodeURIComponent(id)}`);
-  document.getElementById('meta').innerHTML = `
-    <div class="muted">${m.board_name||''}</div>
-    <div style="font-size:18px;margin:6px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
-    <div>${m.location||''}</div>
-    <div class="muted" style="margin-top:6px">Status: ${m.status}${m.posted_at?` • Posted ${m.posted_at}`:''}</div>
-  `;
-  const files = await j(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(id)}`);
-  const root=document.getElementById('files');
-  if(!files.length){ const d=document.createElement('div'); d.className='card muted'; d.textContent='No documents yet.'; root.appendChild(d); }
-  files.forEach(x=>{
-    const d=document.createElement('div'); d.className='card';
-    d.innerHTML = `<a class="btn" target="_blank" href="${x.url}">${x.label||x.type}</a>` + (x.change_log? `<div class="muted" style="margin-top:6px">${x.change_log}</div>`:'');
-    root.appendChild(d);
-  });
-</script>
+    <h3>Agenda & Packet</h3>
+    <div id="files" class="files" style="margin-bottom:12px"></div>
+
+    <h3>Agenda Items</h3>
+    <div id="agendaItems" class="files"></div>
+  </div>
 </body>
 </html>
