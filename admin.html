@@ -23,33 +23,50 @@
   import { renderSignIn, postSecure, WEBAPP_URL } from './js/auth.js';
 
   const app = document.getElementById('app');
-  renderSignIn('signin', async ()=>{ app.style.display='block'; await build(); });
+  const list = document.getElementById('list');
 
-  async function j(u){ const r=await fetch(u); return r.json(); }
+  renderSignIn('signin', async ()=>{
+    app.style.display='block';
+    try {
+      await build();
+    } catch (e) {
+      list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`;
+    }
+  });
+
+  async function j(u){ const r=await fetch(u); if(!r.ok) throw new Error('Failed to load: '+r.status); return r.json(); }
 
   async function build(){
+    list.innerHTML = '<div class="card">Loading…</div>';
+
     const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=50`);
-    const pending = await postSecure('admin_pending', {});
-    const pendingByMid = pending.reduce((m,x)=>{ (m[x.meeting_id]=m[x.meeting_id]||[]).push(x); return m; }, {});
-    const root = document.getElementById('list'); root.innerHTML='';
 
-    // For quick badge: whether approved agenda exists
-    async function hasAgenda(mid){
-      const fs = await j(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(mid)}`);
-      return fs.some(x=>x.type==='agenda');
+    // Attempt to load pending queue; if it fails we still show meetings
+    let pending = [];
+    try { pending = await postSecure('admin_pending', {}); }
+    catch (e) {
+      // Show a visible warning, but continue
+      list.innerHTML = `<div class="card" style="border-color:#f66"><b>Admin API warning:</b> ${e.message}</div>`;
     }
+    const pendingByMid = pending.reduce((m,x)=>{ (m[x.meeting_id]=m[x.meeting_id]||[]).push(x); return m; }, {});
 
+    // Render meetings
     for (const m of meetings){
-      // pull agenda presence (sequential to keep simple)
-      const agenda = await hasAgenda(m.meeting_id);
-      const pend   = pendingByMid[m.meeting_id] || [];
-      const card = document.createElement('div'); card.className='card';
+      // Check if agenda exists
+      let agenda = false;
+      try {
+        const fs = await j(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(m.meeting_id)}`);
+        agenda = fs.some(x=>x.type==='agenda');
+      } catch {/* ignore */}
+
+      const pend = pendingByMid[m.meeting_id] || [];
       const badges = [];
       if (!agenda) badges.push('<span class="badge">Needs agenda</span>');
       if (pend.length) badges.push(`<span class="badge">${pend.length} pending</span>`);
       if (m.status==='awaiting-approval') badges.push('<span class="badge">Awaiting approval</span>');
       if (m.status==='posted') badges.push('<span class="badge">Posted</span>');
 
+      const card = document.createElement('div'); card.className='card';
       card.innerHTML = `
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
           <div>
@@ -62,7 +79,17 @@
             <a class="btn" href="./admin_edit.html?id=${encodeURIComponent(m.meeting_id)}">Edit</a>
           </div>
         </div>`;
-      root.appendChild(card);
+      // Append card below any warning message
+      if (list.firstChild && list.firstChild.textContent?.includes('Admin API warning')) {
+        list.appendChild(card);
+      } else {
+        list.innerHTML = ''; // first real card clears "Loading…"
+        list.appendChild(card);
+      }
+    }
+
+    if (!meetings.length) {
+      list.innerHTML = '<div class="card">No meetings to display.</div>';
     }
   }
 </script>
