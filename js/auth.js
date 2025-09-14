@@ -1,111 +1,158 @@
-// Keep this tag in any page using sign-in:
-// <script src="https://accounts.google.com/gsi/client" async defer></script>
+/* OpenMeet auth.js — GIS (ID token) helper
+ *
+ * Exports:
+ *   - WEBAPP_URL           → your Apps Script Web App endpoint (ends with /exec)
+ *   - initGoogle()         → load Google Identity Services & prep sign-in
+ *   - getIdToken(force)    → returns a Promise<string> Google ID token (JWT)
+ *
+ * This uses Google Identity Services "google.accounts.id" to obtain an ID token.
+ * We cache it in localStorage so a page refresh still "remembers" you're signed in
+ * until the token is near expiry.
+ */
 
-export const GOOGLE_CLIENT_ID =
-  "1053304257177-3lm950qstcn6cvb1omjnqbj3dqlv1o08.apps.googleusercontent.com";
+// TODO: ⬇️  Replace with your deployed Apps Script Web App URL (must be /exec)
+export const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzz1vfALij7VdOOhI_gI2ZnCsHydglOsG1kXIG6Yp2sXWdpqScVwxwm-YBg5-6DeOrz/exec';
 
-// IMPORTANT: use your Apps Script *exec* URL (not /dev)
-export const WEBAPP_URL =
-  "https://script.google.com/macros/s/AKfycbzz1vfALij7VdOOhI_gI2ZnCsHydglOsG1kXIG6Yp2sXWdpqScVwxwm-YBg5-6DeOrz/exec";
+// Your OAuth 2.0 Client ID must match CFG.OAUTH_AUDIENCE in Code.gs
+const CLIENT_ID = '1053304257177-3lm950qstcn6cvb1omjnqbj3dqlv1o08.apps.googleusercontent.com';
 
-let idToken = null;
-const KEY = "om_id_token";
+// Storage keys
+const LS_TOKEN = 'openmeet_idt';
+const LS_EXP   = 'openmeet_idt_exp'; // unix seconds
 
-// ---- Token helpers (persist across refresh) ----
-export function getToken() {
-  return idToken || localStorage.getItem(KEY) || null;
-}
-export function setToken(tok) {
-  idToken = tok || null;
-  if (tok) localStorage.setItem(KEY, tok);
-  else localStorage.removeItem(KEY);
-}
-export function clearToken() { setToken(null); }
+let _gisLoaded = false;
+let _initDone  = false;
+let _pendingResolver = null; // when waiting for a credential from the callback
 
-// ---- Wait for GIS to be ready ----
-async function waitForGIS(maxMs = 6000, intervalMs = 50) {
+function loadScript(src) {
   return new Promise((resolve, reject) => {
-    const start = Date.now();
-    (function tick(){
-      if (window.google?.accounts?.id) return resolve(window.google.accounts.id);
-      if (Date.now() - start >= maxMs) return reject(new Error("Google Identity Services failed to load."));
-      setTimeout(tick, intervalMs);
-    })();
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.defer = true;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load ' + src));
+    document.head.appendChild(s);
   });
 }
 
-export function promptSignIn() {
-  try { window.google?.accounts?.id?.prompt?.(); } catch {}
+function parseJwt(token) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
 }
 
-// ---- Render sign-in button; autostart if token already saved ----
-export async function renderSignIn(buttonId, onSignedIn) {
-  const saved = getToken();
-  if (saved && typeof onSignedIn === "function") {
-    // start immediately; GIS will render button when ready
-    try { onSignedIn(); } catch {}
-  }
-
-  let gis;
-  try { gis = await waitForGIS(); }
-  catch {
-    const el = document.getElementById(buttonId);
-    if (el) {
-      el.innerHTML = "";
-      const btn = document.createElement("button");
-      btn.className = "btn";
-      btn.textContent = "Sign in with Google";
-      btn.onclick = async ()=>{
-        try { const g = await waitForGIS(4000); initAndRender(g, buttonId, onSignedIn); }
-        catch { alert("Google Sign-In could not initialize. Please reload the page."); }
-      };
-      el.appendChild(btn);
-    }
-    return;
-  }
-
-  initAndRender(gis, buttonId, onSignedIn);
+function isValidCached() {
+  const t = localStorage.getItem(LS_TOKEN);
+  const exp = Number(localStorage.getItem(LS_EXP) || 0);
+  if (!t || !exp) return false;
+  const now = Math.floor(Date.now() / 1000);
+  // refresh if less than 60s remaining
+  return (exp - now) > 60;
 }
 
-function initAndRender(gis, buttonId, onSignedIn){
-  gis.initialize({
-    client_id: GOOGLE_CLIENT_ID,
-    callback: (resp)=>{
-      if (resp?.credential) {
-        setToken(resp.credential);
-        if (typeof onSignedIn === "function") onSignedIn();
+function saveToken(idt) {
+  const payload = parseJwt(idt) || {};
+  const exp = Number(payload.exp || 0);
+  localStorage.setItem(LS_TOKEN, idt);
+  localStorage.setItem(LS_EXP, String(exp));
+}
+
+function clearToken() {
+  localStorage.removeItem(LS_TOKEN);
+  localStorage.removeItem(LS_EXP);
+}
+
+/**
+ * Initialize Google Identity Services and prep a credential callback.
+ * Call once near app startup.
+ */
+export async function initGoogle() {
+  if (_initDone) return;
+  await loadScript('https://accounts.google.com/gsi/client');
+  _gisLoaded = true;
+
+  // Set up the one callback we’ll use for prompted sign-in
+  window.__openmeet_onCredential = (resp) => {
+    try {
+      const idt = resp && resp.credential;
+      if (idt) {
+        saveToken(idt);
+        if (_pendingResolver) { _pendingResolver(idt); _pendingResolver = null; }
+      } else {
+        // No credential returned; clear cache
+        clearToken();
+        if (_pendingResolver) { _pendingResolver(Promise.reject(new Error('No credential'))); _pendingResolver = null; }
       }
+    } catch (e) {
+      console.error(e);
+      clearToken();
+      if (_pendingResolver) { _pendingResolver(Promise.reject(e)); _pendingResolver = null; }
     }
-  });
-  const el = document.getElementById(buttonId);
-  if (el) {
-    el.innerHTML = "";
-    gis.renderButton(el, { theme: "outline", size: "large" });
+  };
+
+  // Initialize GIS. We won't render a button here; we just prompt when needed.
+  // You can still render a button elsewhere using google.accounts.id.renderButton().
+  // NOTE: use_fedcm_for_prompt improves UX in modern browsers.
+  // The callback will fire with a JWT (id_token) when the user completes sign-in.
+  if (window.google && google.accounts && google.accounts.id) {
+    google.accounts.id.initialize({
+      client_id: CLIENT_ID,
+      callback: window.__openmeet_onCredential,
+      auto_select: false,
+      cancel_on_tap_outside: true,
+      use_fedcm_for_prompt: true
+    });
+  } else {
+    throw new Error('Google Identity Services failed to load.');
   }
-  promptSignIn();
+
+  _initDone = true;
 }
 
-// ---- Secure POST (no CORS preflight) ----
-export async function postSecure(action, payload) {
-  const tok = getToken();
-  if (!tok) { promptSignIn(); throw new Error("Not signed in."); }
+/**
+ * Get a valid Google ID token (JWT).
+ * - If we have a non-expired cached token, returns it immediately.
+ * - Otherwise triggers the GIS prompt flow and resolves when the user signs in.
+ *
+ * @param {boolean} force  Set true to ignore cache and force a fresh prompt.
+ * @returns {Promise<string>} id_token
+ */
+export async function getIdToken(force = false) {
+  if (!_initDone) await initGoogle();
 
-  const r = await fetch(WEBAPP_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action, id_token: tok, ...payload }),
-  });
-
-  const text = await r.text();
-  let out; try { out = JSON.parse(text); }
-  catch { throw new Error("Bad JSON from server: " + text.slice(0,200)); }
-
-  if (out && out.error) {
-    if (/Invalid id_token|Missing id_token|Mismatched audience|Staff\/Clerk Google account required/i.test(out.error)) {
-      clearToken(); promptSignIn();
-      throw new Error("Your session expired or is not authorized. Please sign in again.");
-    }
-    throw new Error(out.error);
+  if (!force && isValidCached()) {
+    return localStorage.getItem(LS_TOKEN);
   }
-  return out;
+
+  // Prompt the user; resolve once our credential callback fires.
+  return new Promise((resolve, reject) => {
+    _pendingResolver = resolve;
+    try {
+      google.accounts.id.prompt((notification) => {
+        // If the user closes the dialog or there’s an error, reject gracefully.
+        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+          _pendingResolver = null;
+          reject(new Error('Sign-in needed'));
+        }
+      });
+    } catch (e) {
+      _pendingResolver = null;
+      reject(e);
+    }
+  });
+}
+
+/** Optional helper you can call from a Sign out button */
+export function signOut() {
+  try { google.accounts.id.disableAutoSelect(); } catch {}
+  clearToken();
 }
