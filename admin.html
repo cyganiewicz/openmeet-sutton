@@ -5,7 +5,6 @@
   <title>OpenMeet – Admin</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
-  <!-- Keep GIS script; our code waits for it safely -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -21,64 +20,49 @@
 </div>
 
 <script type="module">
-  import { renderSignIn, postSecure, WEBAPP_URL, getToken, promptSignIn } from './js/auth.js';
+  import { renderSignIn, postSecure, WEBAPP_URL, getToken, promptSignIn } from './js/auth.js?v=4';
 
   const app = document.getElementById('app');
   const list = document.getElementById('list');
 
-  // Start UI either when user signs in OR if we already have a token from a prior session.
-  function startApp() {
-    app.style.display = 'block';
+  function startApp(){
+    app.style.display='block';
     build().catch(e => {
       list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`;
     });
   }
 
-  // Render the Google button and auto-start if token already present
   renderSignIn('signin', startApp);
-  if (getToken()) {
-    // Give GIS a brief moment to initialize, then start
-    setTimeout(startApp, 50);
-  }
+  if (getToken()) setTimeout(startApp, 50);
 
-  async function j(u) {
-    const r = await fetch(u);
-    if (!r.ok) throw new Error('Failed to load: ' + r.status);
-    return r.json();
-  }
+  async function j(u){ const r=await fetch(u); if(!r.ok) throw new Error('Failed to load: '+r.status); return r.json(); }
 
-  async function build() {
+  async function build(){
     list.innerHTML = '<div class="card">Loading…</div>';
 
-    // Public data first (no auth needed)
     const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=50`);
 
-    // Then try the secured queue
     let pending = [];
-    try {
-      pending = await postSecure('admin_pending', {});
-    } catch (e) {
-      // Token may be expired; ask to sign in but still show meetings
+    try { pending = await postSecure('admin_pending', {}); }
+    catch (e) {
       promptSignIn();
       list.innerHTML = `<div class="card" style="border-color:#f66"><b>Sign-in needed:</b> ${e.message}</div>`;
     }
     const pendingByMid = pending.reduce((m,x)=>{ (m[x.meeting_id]=m[x.meeting_id]||[]).push(x); return m; }, {});
 
-    // Render cards
-    for (const m of meetings) {
-      // Check for agenda presence (public files)
+    for (const m of meetings){
       let agenda = false;
       try {
         const fs = await j(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(m.meeting_id)}`);
-        agenda = fs.some(x => x.type === 'agenda');
-      } catch { /* ignore */ }
+        agenda = fs.some(x=>x.type==='agenda');
+      } catch {}
 
       const pend = pendingByMid[m.meeting_id] || [];
       const badges = [];
       if (!agenda) badges.push('<span class="badge">Needs agenda</span>');
       if (pend.length) badges.push(`<span class="badge">${pend.length} pending</span>`);
-      if (m.status === 'awaiting-approval') badges.push('<span class="badge">Awaiting approval</span>');
-      if (m.status === 'posted') badges.push('<span class="badge">Posted</span>');
+      if (m.status==='awaiting-approval') badges.push('<span class="badge">Awaiting approval</span>');
+      if (m.status==='posted') badges.push('<span class="badge">Posted</span>');
 
       const card = document.createElement('div'); card.className='card';
       card.innerHTML = `
@@ -97,10 +81,7 @@
       if (list.firstChild && list.firstChild.textContent?.includes('Loading…')) list.innerHTML = '';
       list.appendChild(card);
     }
-
-    if (!meetings.length) {
-      list.innerHTML = '<div class="card">No meetings to display.</div>';
-    }
+    if (!meetings.length) list.innerHTML = '<div class="card">No meetings to display.</div>';
   }
 </script>
 </body>
