@@ -2,7 +2,7 @@
 // <script src="https://accounts.google.com/gsi/client" async defer></script>
 
 export const GOOGLE_CLIENT_ID = "1053304257177-3lm950qstcn6cvb1omjnqbj3dqlv1o08.apps.googleusercontent.com";
-export const WEBAPP_URL = "https://script.google.com/macros/s/REPLACE_WITH_YOUR_EXEC_URL/exec"; // MUST be the /exec URL
+export const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzz1vfALij7VdOOhI_gI2ZnCsHydglOsG1kXIG6Yp2sXWdpqScVwxwm-YBg5-6DeOrz/exec"; // MUST be the /exec URL
 
 let idToken = null; // in-memory cache
 const KEY = "om_id_token"; // persisted across refreshes
