@@ -5,84 +5,162 @@
   <title>OpenMeet – Admin</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    .toolbar{display:flex;align-items:center;gap:12px;justify-content:space-between}
+    .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .kpi{padding:12px;border-radius:12px;background:#0f172a;color:#fff}
+    .table{width:100%;border-collapse:separate;border-spacing:0 8px}
+    .row{background:#0b1020;color:#e5e7eb;border-radius:12px;padding:12px;display:grid;grid-template-columns:180px 1fr 320px;gap:12px;align-items:center}
+    .pill{padding:4px 8px;border-radius:999px;background:#1f2937;color:#ddd;font-size:12px}
+    .btn-ghost{background:transparent;border:1px solid #334155}
+    dialog{max-width:720px;width:96%;border:0;border-radius:12px;padding:0;overflow:hidden}
+    .dlg-head{background:#0f172a;color:#fff;padding:12px 16px}
+    .dlg-body{padding:16px}
+    .item{padding:8px 12px;border:1px solid #e5e7eb;border-radius:10px;margin:6px 0}
+    .muted{opacity:.8}
+  </style>
+  <script type="module">
+    import { WEBAPP_URL, initGoogle, getIdToken } from './js/auth.js';
+
+    const $ = (s, r=document)=>r.querySelector(s);
+    const $$= (s, r=document)=>Array.from(r.querySelectorAll(s));
+
+    async function jget(u){ const r=await fetch(u); const t=await r.text(); try{const j=JSON.parse(t); if(j.error) throw new Error(j.error); return j;}catch(e){throw new Error('Bad JSON: '+t);} }
+    async function jpost(o){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(o)}); const t=await r.text(); try{const j=JSON.parse(t); if(j.error) throw new Error(j.error); return j;}catch(e){throw new Error('Bad JSON: '+t);} }
+
+    let IDT = null;
+    async function requireSignIn(){
+      await initGoogle();
+      IDT = await getIdToken(true); // force prompt if needed
+      $('#who').textContent = 'Signed in';
+    }
+
+    function dedupeBy(arr, key){
+      const seen=new Set(), out=[];
+      for(const x of arr){ const k=x[key]; if(!seen.has(k)){ seen.add(k); out.push(x); } }
+      return out;
+    }
+
+    async function loadQueue(){
+      const pending = await jpost({action:'admin_pending', id_token:IDT});
+      // Also load near-term meetings to populate the main list (re-use public meetings)
+      const upcoming = await jget(`${WEBAPP_URL}?route=api/public/meetings&limit=200`);
+      const byId = {};
+      dedupeBy(upcoming,'meeting_id').forEach(m => byId[m.meeting_id]=m);
+
+      // KPI
+      $('#kpiPending').textContent = String(pending.length);
+      $('#kpiMeetings').textContent = String(Object.keys(byId).length);
+
+      // Render rows
+      const list = $('#rows'); list.innerHTML='';
+      const queueByMeeting = {};
+      pending.forEach(p => {
+        (queueByMeeting[p.meeting_id] ||= []).push(p);
+      });
+
+      for (const [mid, items] of Object.entries(queueByMeeting)){
+        const m = byId[mid] || {title:'(Draft)', date:'', board_name:'', status:'awaiting-approval'};
+        const row = document.createElement('div');
+        row.className='row';
+        row.innerHTML = `
+          <div>
+            <div style="font-weight:700">${m.board_name||'(Board)'} </div>
+            <div class="muted">${m.date||''} ${m.start_time||''}</div>
+          </div>
+          <div>
+            <div style="font-weight:600">${m.title||'Meeting'}</div>
+            <div class="muted">${m.location||''}</div>
+            <div style="margin-top:6px">${items.map(it=>`<span class="pill">${it.type.toUpperCase()}</span>`).join(' ')}</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+            <button class="btn" data-act="view" data-mid="${mid}">View agenda items</button>
+            <button class="btn" data-act="approve" data-mid="${mid}">Approve agenda</button>
+            <a class="btn btn-ghost" target="_blank" href="https://drive.google.com/drive/folders/${m.public_folder_id||''}">Open Public</a>
+            <a class="btn btn-ghost" target="_blank" href="https://drive.google.com/drive/folders/${m.draft_folder_id||''}">Open Drafts</a>
+            <button class="btn btn-ghost" data-act="edit" data-mid="${mid}">Quick edit</button>
+          </div>`;
+        list.appendChild(row);
+      }
+
+      if (!list.children.length){
+        const e = document.createElement('div');
+        e.className='muted'; e.textContent='No items awaiting approval.';
+        list.appendChild(e);
+      }
+
+      // Wire actions
+      $$('#rows [data-act="approve"]').forEach(b=>b.onclick=()=>approveAgenda(b.dataset.mid));
+      $$('#rows [data-act="view"]').forEach(b=>b.onclick=()=>showAgenda(b.dataset.mid));
+      $$('#rows [data-act="edit"]').forEach(b=>b.onclick=()=>openEditor(b.dataset.mid));
+    }
+
+    async function showAgenda(meeting_id){
+      const data = await jpost({action:'admin_get_agenda_json', id_token:IDT, meeting_id});
+      $('#dlgTitle').textContent = 'Agenda items ('+meeting_id+')';
+      const box = $('#agendaItems'); box.innerHTML='';
+      if (!data.items || !data.items.length){ box.innerHTML='<div class="muted">No items captured from builder.</div>'; }
+      else data.items.forEach((it, i)=>{
+        const div = document.createElement('div'); div.className='item';
+        div.innerHTML = `<div style="font-weight:700">${i+1}. ${it.title||'Item'}</div><div class="muted">${it.notes||''}</div>`;
+        box.appendChild(div);
+      });
+      $('#agendaMeta').textContent = (data.footer_note||'') + (data.remote && (data.remote.url||data.remote.phone) ? ' • Remote info provided' : '');
+      $('#dlg').showModal();
+    }
+    $('#closeDlg')?.addEventListener('click', ()=>$('#dlg').close());
+
+    async function approveAgenda(meeting_id){
+      // find the pending AGENDA row_id for this meeting
+      const pending = await jpost({action:'admin_pending', id_token:IDT});
+      const row = pending.find(x=>x.meeting_id===meeting_id && x.type==='agenda');
+      if (!row){ alert('No agenda awaiting approval for this meeting.'); return; }
+      const res = await jpost({action:'admin_approve', id_token:IDT, row_id: row.row_id});
+      alert('Agenda approved & published.\n\n'+(res.publicLink||''));
+      await loadQueue();
+    }
+
+    function openEditor(meeting_id){
+      // Deep link to your existing edit page if you have one; fallback to drive
+      location.href = `./admin_edit.html?id=${encodeURIComponent(meeting_id)}`;
+    }
+
+    // Boot
+    (async function(){
+      try{
+        await requireSignIn();
+        await loadQueue();
+      }catch(e){
+        console.error(e);
+        alert('Sign-in required for Clerk/Admin.');
+      }
+    })();
+  </script>
 </head>
 <body>
-<div class="wrap">
-  <header style="display:flex;justify-content:space-between;align-items:center">
-    <h1>Admin</h1>
-    <div id="signin"><div class="muted">Loading sign-in…</div></div>
-  </header>
+  <div class="wrap">
+    <div class="toolbar">
+      <h2>Clerk Console</h2>
+      <div id="who" class="muted">Loading sign-in…</div>
+    </div>
 
-  <div id="app" style="display:none">
-    <div id="list"></div>
+    <div class="kpis" style="margin:12px 0 16px">
+      <div class="kpi"><div class="muted">Awaiting approval</div><div id="kpiPending" style="font-size:28px;font-weight:800">0</div></div>
+      <div class="kpi"><div class="muted">Meetings indexed</div><div id="kpiMeetings" style="font-size:28px;font-weight:800">0</div></div>
+      <div class="kpi"><div class="muted">Today</div><div style="font-size:28px;font-weight:800"><script>document.write(new Date().toLocaleDateString())</script></div></div>
+      <div class="kpi"><div class="muted">Domain</div><div style="font-size:28px;font-weight:800">town.sutton.ma.us</div></div>
+    </div>
+
+    <h3>Action Queue</h3>
+    <div id="rows"></div>
   </div>
-</div>
 
-<script type="module">
-  import { renderSignIn, postSecure, WEBAPP_URL, getToken, promptSignIn } from './js/auth.js?v=4';
-
-  const app = document.getElementById('app');
-  const list = document.getElementById('list');
-
-  function startApp(){
-    app.style.display='block';
-    build().catch(e => {
-      list.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`;
-    });
-  }
-
-  renderSignIn('signin', startApp);
-  if (getToken()) setTimeout(startApp, 50);
-
-  async function j(u){ const r=await fetch(u); if(!r.ok) throw new Error('Failed to load: '+r.status); return r.json(); }
-
-  async function build(){
-    list.innerHTML = '<div class="card">Loading…</div>';
-
-    const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=50`);
-
-    let pending = [];
-    try { pending = await postSecure('admin_pending', {}); }
-    catch (e) {
-      promptSignIn();
-      list.innerHTML = `<div class="card" style="border-color:#f66"><b>Sign-in needed:</b> ${e.message}</div>`;
-    }
-    const pendingByMid = pending.reduce((m,x)=>{ (m[x.meeting_id]=m[x.meeting_id]||[]).push(x); return m; }, {});
-
-    for (const m of meetings){
-      let agenda = false;
-      try {
-        const fs = await j(`${WEBAPP_URL}?route=api/public/files&meeting_id=${encodeURIComponent(m.meeting_id)}`);
-        agenda = fs.some(x=>x.type==='agenda');
-      } catch {}
-
-      const pend = pendingByMid[m.meeting_id] || [];
-      const badges = [];
-      if (!agenda) badges.push('<span class="badge">Needs agenda</span>');
-      if (pend.length) badges.push(`<span class="badge">${pend.length} pending</span>`);
-      if (m.status==='awaiting-approval') badges.push('<span class="badge">Awaiting approval</span>');
-      if (m.status==='posted') badges.push('<span class="badge">Posted</span>');
-
-      const card = document.createElement('div'); card.className='card';
-      card.innerHTML = `
-        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-          <div>
-            <div class="muted">${m.board_name||''}</div>
-            <div style="font-size:18px;margin:4px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
-            <div class="muted">${m.location||''}</div>
-            <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${badges.join('')}</div>
-          </div>
-          <div>
-            <a class="btn" href="./admin_edit.html?id=${encodeURIComponent(m.meeting_id)}">Edit</a>
-          </div>
-        </div>`;
-
-      if (list.firstChild && list.firstChild.textContent?.includes('Loading…')) list.innerHTML = '';
-      list.appendChild(card);
-    }
-    if (!meetings.length) list.innerHTML = '<div class="card">No meetings to display.</div>';
-  }
-</script>
+  <dialog id="dlg">
+    <div class="dlg-head"><strong id="dlgTitle">Agenda items</strong> <button id="closeDlg" class="btn" style="float:right">Close</button></div>
+    <div class="dlg-body">
+      <div id="agendaItems"></div>
+      <div id="agendaMeta" class="muted" style="margin-top:8px"></div>
+    </div>
+  </dialog>
 </body>
 </html>
