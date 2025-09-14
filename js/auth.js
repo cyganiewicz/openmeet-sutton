@@ -9,7 +9,7 @@
 */
 
 // ⛳ Replace with your deployed Apps Script Web App URL ending in /exec
-export const WEBAPP_URL = 'https://script.google.com/macros/s/REPLACE_WITH_YOURS/exec';
+export const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzz1vfALij7VdOOhI_gI2ZnCsHydglOsG1kXIG6Yp2sXWdpqScVwxwm-YBg5-6DeOrz/exec';
 
 // Must match CFG.OAUTH_AUDIENCE in Code.gs
 const CLIENT_ID = '1053304257177-3lm950qstcn6cvb1omjnqbj3dqlv1o08.apps.googleusercontent.com';
