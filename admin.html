@@ -2,28 +2,34 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>OpenMeet – Admin</title>
+  <title>OpenMeet – Clerk Console</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
   <style>
-    .toolbar{display:flex;align-items:center;gap:12px;justify-content:space-between}
-    .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px}
     .kpi{padding:12px;border-radius:12px;background:#0f172a;color:#fff}
-    .row{background:#0b1020;color:#e5e7eb;border-radius:12px;padding:12px;display:grid;grid-template-columns:180px 1fr 340px;gap:12px;align-items:center}
+    .row{background:#0b1020;color:#e5e7eb;border-radius:12px;padding:12px;display:grid;grid-template-columns:180px 1fr 340px;gap:12px;align-items:center;margin:10px 0}
     .pill{padding:4px 8px;border-radius:999px;background:#1f2937;color:#ddd;font-size:12px}
     .btn-ghost{background:transparent;border:1px solid #334155}
+    .muted{opacity:.8}
     dialog{max-width:760px;width:96%;border:0;border-radius:12px;padding:0;overflow:hidden}
     .dlg-head{background:#0f172a;color:#fff;padding:12px 16px}
     .dlg-body{padding:16px}
     .item{padding:8px 12px;border:1px solid #e5e7eb;border-radius:10px;margin:6px 0}
-    .muted{opacity:.8}
     .toast{position:fixed;right:12px;bottom:12px;background:#0f172a;color:#fff;padding:10px 14px;border-radius:10px}
   </style>
+
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
   <script type="module">
     import * as Auth from './js/auth.js?v=3.0.1';
+    import { mountTopnav } from './js/topnav.js?v=1';
 
-    const $ = (s, r=document)=>r.querySelector(s);
-    const $$= (s, r=document)=>Array.from(r.querySelectorAll(s));
+    const $  = (s, r=document)=>r.querySelector(s);
+    const $$ = (s, r=document)=>Array.from(r.querySelectorAll(s));
+
     const WEBAPP_URL = Auth.WEBAPP_URL;
     let IDT = null;
 
@@ -48,13 +54,8 @@
       await Auth.initGoogle();
       IDT = Auth.peekIdToken();
       if (!IDT){
-        try{
-          IDT = await Auth.getIdToken(false); // prompt only if needed
-        }catch{
-          $('#who').textContent='Sign-in required'; throw new Error('Sign-in required');
-        }
+        try{ IDT = await Auth.getIdToken(false); } catch{ throw new Error('Sign-in required'); }
       }
-      $('#who').textContent='Signed in';
     }
 
     async function loadQueue(){
@@ -79,7 +80,7 @@
           <div>
             <div style="font-weight:600">${m.title||'Meeting'}</div>
             <div class="muted">${m.location||''}</div>
-            <div style="margin-top:6px">${items.map(it=>`<span class="pill">${it.type.toUpperCase()}</span>`).join(' ')}</div>
+            <div style="margin-top:6px">${items.map(it=>`<span class="pill">${String(it.type||'').toUpperCase()}</span>`).join(' ')}</div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
             <button class="btn" data-act="view" data-mid="${mid}">View agenda items</button>
@@ -105,7 +106,7 @@
         const box=$('#agendaItems'); box.innerHTML='';
         $('#dlgTitle').textContent='Agenda items ('+meeting_id+')';
         if (!data.items || !data.items.length){
-          box.innerHTML = '<div class="muted">No items captured from builder. If this is unexpected, make sure your backend calls <code>saveAgendaJson_()</code> inside <code>create_agenda_from_form</code>.</div>';
+          box.innerHTML = '<div class="muted">No items captured from builder for this meeting.</div>';
         } else {
           data.items.forEach((it,i)=>{
             const div=document.createElement('div'); div.className='item';
@@ -115,60 +116,44 @@
         }
         $('#agendaMeta').textContent = (data.footer_note||'') + (data.remote && (data.remote.url||data.remote.phone) ? ' • Remote info provided' : '');
         $('#dlg').showModal();
-      }catch(e){
-        console.error(e); alert('Could not load agenda JSON: '+e.message);
-      }
+      }catch(e){ console.error(e); alert('Could not load agenda JSON: '+e.message); }
     }
     $('#closeDlg')?.addEventListener('click', ()=>$('#dlg').close());
 
     async function approveAgenda(meeting_id){
       try{
         const pending = await jpost({action:'admin_pending', id_token:IDT});
-        // Type is stored lowercase in backend: 'agenda'
-        const row = pending.find(x=>x.meeting_id===meeting_id && String(x.type).toLowerCase()==='agenda');
+        const row = pending.find(x=>x.meeting_id===meeting_id && String(x.type||'').toLowerCase()==='agenda');
         if (!row){ alert('No agenda awaiting approval for this meeting.'); return; }
-        const res = await jpost({action:'admin_approve', id_token:IDT, row_id: row.row_id});
+        await jpost({action:'admin_approve', id_token:IDT, row_id: row.row_id});
         toast('Agenda approved & published');
-        // Optional: open the public link
-        // if (res.publicLink) window.open(res.publicLink, '_blank');
         await loadQueue();
-      }catch(e){
-        console.error(e);
-        alert('Approve failed: '+e.message);
-      }
+      }catch(e){ console.error(e); alert('Approve failed: '+e.message); }
     }
-
-    function openEditor(meeting_id){
-      // Carry the token via session storage; editor will call peekIdToken()
-      location.href = `./admin_edit.html?id=${encodeURIComponent(meeting_id)}`;
-    }
+    function openEditor(meeting_id){ location.href = `./admin_edit.html?id=${encodeURIComponent(meeting_id)}`; }
 
     (async function(){
-      try{
-        await ensureSignIn();
-        await loadQueue();
-      }catch(e){
-        console.error(e);
-        alert('Sign-in required for Clerk/Admin.');
-      }
-    })();
+      await mountTopnav();           // ⭐ renders Google button / status at top
+      await ensureSignIn();          // obtain IDT (cached or prompt)
+      await loadQueue();
+    })().catch(e=>{ console.error(e); alert('Sign-in required for Clerk/Admin.'); });
   </script>
 </head>
 <body>
-  <div class="wrap">
-    <div class="toolbar">
-      <h2>Clerk Console</h2>
-      <div id="who" class="muted">Loading sign-in…</div>
-    </div>
+  <!-- Top nav with Google button/status -->
+  <div id="topnav"></div>
 
-    <div class="kpis" style="margin:12px 0 16px">
+  <div class="wrap">
+    <h2>Clerk Console</h2>
+
+    <div class="kpis">
       <div class="kpi"><div class="muted">Awaiting approval</div><div id="kpiPending" style="font-size:28px;font-weight:800">0</div></div>
       <div class="kpi"><div class="muted">Meetings indexed</div><div id="kpiMeetings" style="font-size:28px;font-weight:800">0</div></div>
       <div class="kpi"><div class="muted">Today</div><div style="font-size:28px;font-weight:800"><script>document.write(new Date().toLocaleDateString())</script></div></div>
       <div class="kpi"><div class="muted">Domain</div><div style="font-size:28px;font-weight:800">town.sutton.ma.us</div></div>
     </div>
 
-    <h3>Action Queue</h3>
+    <h3 style="margin-top:14px">Action Queue</h3>
     <div id="rows"></div>
   </div>
 
