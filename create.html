@@ -5,7 +5,6 @@
   <title>OpenMeet – Create Meeting</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
-  <!-- Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .wrap{max-width:900px;margin:0 auto;padding:16px}
@@ -15,10 +14,11 @@
     .items .it{display:grid;grid-template-columns:1fr auto auto;gap:8px;margin:6px 0}
     .btn-ghost{background:transparent;border:1px solid #cbd5e1}
     input, select, textarea{width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px}
+    .chip{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #e5e7eb;background:#f8fafc}
   </style>
   <script type="module">
     import * as Auth from './js/auth.js?v=3.0.2';
-    import { mountTopnav } from './js/topnav.js?v=2';
+    import { mountTopnav } from './js/topnav.js?v=4';
 
     const $ = s=>document.querySelector(s);
     const WEBAPP_URL = Auth.WEBAPP_URL;
@@ -31,15 +31,26 @@
       const div = document.createElement('div'); div.className='it';
       div.innerHTML = `
         <input placeholder="Agenda item title" value="${title.replace(/"/g,'&quot;')}">
-        <button class="btn btn-ghost" data-act="up">↑</button>
-        <button class="btn btn-ghost" data-act="del">✕</button>
+        <button class="btn btn-ghost" data-act="up" title="Move up">↑</button>
+        <button class="btn btn-ghost" data-act="del" title="Remove">✕</button>
         <textarea placeholder="Notes (optional)" style="grid-column:1/-1;margin-top:6px">${notes||''}</textarea>
       `;
       box.appendChild(div);
     }
 
+    // Require sign-in before enabling Create
+    async function ensureSignedIn(){
+      await Auth.initGoogle();
+      const token = Auth.peekIdToken() || await Auth.getIdToken(false);
+      const email = (()=>{ try{ return JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).email || ''; }catch{return '';} })();
+      $('#who').textContent = email ? email : '(unknown)';
+      $('#create').disabled = !email;
+      return email;
+    }
+
     (async function(){
       await mountTopnav();
+
       // Load boards
       const boards = await jget(`${WEBAPP_URL}?route=api/ui/boards`);
       const sel = $('#board'); sel.innerHTML = '<option value="">Select a board/committee…</option>';
@@ -53,9 +64,9 @@
         if (btn.dataset.act==='del'){ row.remove(); }
         if (btn.dataset.act==='up'){ const prev=row.previousElementSibling; if(prev) row.parentNode.insertBefore(row, prev); }
       });
-
-      // one starter line
       addItemRow('Call to Order','');
+
+      const email = await ensureSignedIn();
 
       $('#create').onclick = async ()=>{
         const board_id = $('#board').value;
@@ -63,15 +74,13 @@
         const date     = $('#date').value;
         const start    = $('#time').value;
         const location = $('#location').value.trim();
-        const submitterEmail = (await (async ()=>{ try{ await Auth.initGoogle(); const t=Auth.peekIdToken()||await Auth.getIdToken(false); const p=JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); return p.email||''; }catch{return '';} })());
-
         if (!board_id || !date){ alert('Please select a board and date.'); return; }
 
-        // 1) Create meeting shell
-        const created = await jpost({action:'create_meeting_open', board_id, title, date, start_time:start, location, submitterEmail});
+        // 1) Create meeting shell (submitterEmail is required so "My Meetings" sees it)
+        const created = await jpost({action:'create_meeting_open', board_id, title, date, start_time:start, location, submitterEmail: email});
         const meeting_id = created.meeting_id;
 
-        // 2) Collect agenda items (optional but recommended)
+        // 2) Agenda JSON (optional)
         const items = Array.from(document.querySelectorAll('#items .it')).map(div=>{
           const [inpTitle, btnUp, btnDel, ta] = div.children;
           return {title: inpTitle.value.trim(), notes: (ta.value||'').trim()};
@@ -86,7 +95,7 @@
         };
 
         if (items.length){
-          await jpost({action:'create_agenda_from_form', meeting_id, items, footerNote, remote, submitterEmail});
+          await jpost({action:'create_agenda_from_form', meeting_id, items, footerNote, remote, submitterEmail: email});
           alert('Meeting created and agenda sent to Clerk for approval.');
         } else {
           alert('Meeting created. You can add materials later via “Your Meetings”.');
@@ -101,6 +110,8 @@
 
   <div class="wrap">
     <h2>Create a Meeting</h2>
+    <p class="muted">Signed in as <span class="chip" id="who">checking…</span></p>
+
     <div class="card">
       <div class="row"><label>Board/Committee</label><select id="board"></select></div>
       <div class="row"><label>Meeting title</label><input id="title" placeholder="e.g., Regular Meeting"></div>
@@ -111,7 +122,7 @@
 
     <div class="card">
       <h3 style="margin-top:0">Agenda (optional)</h3>
-      <p class="muted">Quickly outline your agenda. The Clerk will receive it for posting/approval.</p>
+      <p class="muted">Outline your agenda. The Clerk will receive it for posting/approval.</p>
       <div id="items" class="items"></div>
       <button class="btn btn-ghost" id="addItem" style="margin-top:8px">Add item</button>
 
@@ -126,7 +137,7 @@
     </div>
 
     <div style="display:flex;gap:12px">
-      <button class="btn" id="create">Create meeting</button>
+      <button class="btn" id="create" disabled>Create meeting</button>
       <a class="btn btn-ghost" href="./my.html">Revise my meetings</a>
     </div>
   </div>
