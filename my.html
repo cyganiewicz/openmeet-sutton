@@ -5,14 +5,12 @@
   <title>OpenMeet – Your Meetings</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="./assets/theme.css">
-  <style>.wrap{max-width:1100px;margin:0 auto;padding:16px}.card{margin-bottom:12px}.file{border:1px dashed #334155;border-radius:10px;padding:12px}</style>
-
   <!-- Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-
+  <style>.wrap{max-width:1100px;margin:0 auto;padding:16px}.card{margin-bottom:12px}.file{border:1px dashed #334155;border-radius:10px;padding:12px}</style>
   <script type="module">
-    import * as Auth from './js/auth.js?v=3.0.1';
-    import { mountTopnav } from './js/topnav.js?v=1';
+    import * as Auth from './js/auth.js?v=3.0.2';
+    import { mountTopnav } from './js/topnav.js?v=2';
 
     const $ = s=>document.querySelector(s);
     let IDT=null;
@@ -26,7 +24,7 @@
     }
 
     async function boot(){
-      await mountTopnav();            // ⭐ Google button / status
+      await mountTopnav();
       await Auth.initGoogle();
       IDT = Auth.peekIdToken() || await Auth.getIdToken(false);
 
@@ -66,9 +64,7 @@
   </script>
 </head>
 <body>
-  <!-- Top nav with Google button/status -->
   <div id="topnav"></div>
-
   <div class="wrap">
     <h2>Your Meetings</h2>
     <div id="list" style="margin-top:12px"></div>
