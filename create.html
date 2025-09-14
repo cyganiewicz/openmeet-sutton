@@ -26,17 +26,22 @@
     <label>Location</label><input id="mLoc" placeholder="Town Hall">
     <label>Your email (for confirmations)</label><input id="email" placeholder="you@example.com">
     <button class="btn" id="btnCreate">Create meeting</button>
-    <div id="mOut" class="muted" style="margin-top:8px"></div>
+    <div id="mOut" class="card" style="margin-top:8px;display:none"></div>
   </div>
 </div>
 
 <script type="module">
   import { WEBAPP_URL } from './js/auth.js';
-  async function j(u){ const r=await fetch(u); return r.json(); }
+
+  async function j(u){
+    const r = await fetch(u);
+    if (!r.ok) throw new Error('Failed to load: ' + r.status);
+    return r.json();
+  }
   async function post(bodyObj){
     const r = await fetch(WEBAPP_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoid preflight
       body: JSON.stringify(bodyObj),
     });
     const text = await r.text();
@@ -46,14 +51,25 @@
     return out;
   }
 
-  const boards = await j(`${WEBAPP_URL}?route=api/ui/boards`);
-  board.innerHTML = '<option value="">Select a board/committee…</option>' + boards.map(b=>`<option value="${b.board_id}">${b.name}</option>`).join('');
+  // Load boards with defensive messaging
+  const sel = document.getElementById('board');
+  try {
+    const boards = await j(`${WEBAPP_URL}?route=api/ui/boards`);
+    sel.innerHTML = (boards && boards.length)
+      ? '<option value="">Select a board/committee…</option>' + boards.map(b=>`<option value="${b.board_id}">${b.name}</option>`).join('')
+      : '<option value="">No boards found — check the Boards sheet (header must be "is_active")</option>';
+  } catch (e) {
+    sel.innerHTML = '<option value="">Could not load boards (check WEBAPP_URL)</option>';
+  }
 
-  btnCreate.onclick = async ()=>{
-    const board_id=board.value, date=mDate.value.trim(), title=mTitle.value.trim()||'Regular', loc=mLoc.value.trim(), time=mTime.value.trim(), email=document.getElementById('email').value.trim();
-    if(!board_id) return alert('Choose a board'); if(!date) return alert('Enter a date');
+  const mOut = document.getElementById('mOut');
+  document.getElementById('btnCreate').onclick = async ()=>{
+    const board_id=sel.value, date=mDate.value.trim(), title=mTitle.value.trim()||'Regular', loc=mLoc.value.trim(), time=mTime.value.trim(), email=document.getElementById('email').value.trim();
+    if(!board_id) return alert('Choose a board');
+    if(!date) return alert('Enter a date');
     try{
       const res = await post({action:'create_meeting_open', board_id, date, title, location:loc, start_time:time, submitterEmail:email});
+      mOut.style.display='block';
       mOut.textContent = 'Created meeting: '+res.meeting_id+' (check your email for confirmation)';
       alert('Meeting created');
     }catch(e){ alert(e.message); }
