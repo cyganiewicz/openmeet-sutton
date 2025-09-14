@@ -39,8 +39,18 @@
   import { WEBAPP_URL } from './js/auth.js';
 
   async function j(u){ const r=await fetch(u); return r.json(); }
-  async function post(body){ const r=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const out=await r.json(); if(out.error) throw new Error(out.error); return out; }
-  function toB64(file){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result.split(',')[1]); fr.readAsDataURL(file); }); }
+async function post(bodyObj){
+  const r = await fetch(WEBAPP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(bodyObj),
+  });
+  const text = await r.text();
+  let out;
+  try { out = JSON.parse(text); } catch { throw new Error('Bad JSON from server: ' + text.slice(0,200)); }
+  if (out.error) throw new Error(out.error);
+  return out;
+}  function toB64(file){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result.split(',')[1]); fr.readAsDataURL(file); }); }
 
   const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=20`);
   meetingSel.innerHTML = '<option value="">Select a meeting…</option>' + meetings.map(m=>`<option value="${m.meeting_id}">${m.date} — ${m.board_name||''} — ${m.title||''}</option>`).join('');
