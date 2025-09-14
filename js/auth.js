@@ -12,8 +12,20 @@ export function renderSignIn(buttonId, onSignedIn){
   google.accounts.id.renderButton(document.getElementById(buttonId), { theme:"outline", size:"large" });
 }
 export function token(){ return idToken || sessionStorage.getItem('om_id_token'); }
-export async function postSecure(action, payload){
-  const r = await fetch(WEBAPP_URL, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({action, id_token: token(), ...payload})});
-  const out = await r.json(); if(out && out.error) throw new Error(out.error); return out;
+export async function postSecure(action, payload) {
+  const token = token(); // existing function
+  if (!token) throw new Error("Not signed in");
+
+  const r = await fetch(WEBAPP_URL, {
+    method: "POST",
+    // Use text/plain so the browser does not preflight with OPTIONS
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action, id_token: token, ...payload }),
+  });
+
+  const text = await r.text(); // Apps Script returns text
+  let out;
+  try { out = JSON.parse(text); } catch { throw new Error("Bad JSON from server: " + text.slice(0,200)); }
+  if (out && out.error) throw new Error(out.error);
+  return out;
 }
