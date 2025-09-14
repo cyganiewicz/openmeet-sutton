@@ -21,7 +21,7 @@
   <script type="module">
     // Cache-bust auth.js to avoid stale exports on GitHub Pages
     const v = '3.0.0'; // must match AUTH_JS_VERSION
-    import * as Auth from './js/auth.js?v='+encodeURIComponent(v);
+    import * as Auth from './js/auth.js?v=3.0.0';
 
     const $ = (s, r=document)=>r.querySelector(s);
     const $$= (s, r=document)=>Array.from(r.querySelectorAll(s));
