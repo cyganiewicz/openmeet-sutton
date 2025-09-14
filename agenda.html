@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OpenMeet – Agenda Builder</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="./assets/theme.css">
+</head>
+<body>
+<div class="wrap">
+  <a class="btn" href="./">← Home</a>
+  <h2>Agenda Builder</h2>
+
+  <div class="card">
+    <label>Meeting</label>
+    <select id="meetingSel"></select>
+  </div>
+
+  <div class="card">
+    <h3>Agenda Items</h3>
+    <div id="items"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn" id="add">Add item</button>
+      <button class="btn" id="clear">Clear all</button>
+    </div>
+    <label style="margin-top:10px">Footer note (optional)</label>
+    <input id="footer" placeholder="e.g., Posted per OML on ...">
+    <label style="margin-top:10px">Your email (for confirmations)</label>
+    <input id="email" placeholder="you@example.com">
+    <div style="margin-top:10px">
+      <button class="btn" id="gen">Generate Agenda PDF (to Clerk)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Tips</h3>
+    <div class="muted">Use the up/down arrows to reorder, or delete to remove an item.</div>
+  </div>
+</div>
+
+<script type="module">
+  import { WEBAPP_URL } from './js/auth.js';
+
+  async function j(u){ const r=await fetch(u); if(!r.ok) throw new Error('Failed '+r.status); return r.json(); }
+  async function post(body){
+    const r = await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
+    const t = await r.text(); let out; try{ out=JSON.parse(t);}catch{ throw new Error('Bad JSON: '+t.slice(0,200)); }
+    if (out.error) throw new Error(out.error); return out;
+  }
+
+  const meetingSel = document.getElementById('meetingSel');
+  const itemsRoot = document.getElementById('items');
+  const state = { items: [] };
+
+  function render(){
+    itemsRoot.innerHTML='';
+    state.items.forEach((it, idx)=>{
+      const row = document.createElement('div'); row.className='card';
+      row.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center">
+          <div>
+            <label>Title</label>
+            <input data-k="title" data-i="${idx}" value="${it.title||''}" placeholder="e.g., Approval of minutes">
+            <label>Notes (optional)</label>
+            <input data-k="notes" data-i="${idx}" value="${it.notes||''}" placeholder="e.g., Minutes of Aug 3, 2025">
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn" data-act="up" data-i="${idx}">↑</button>
+            <button class="btn" data-act="down" data-i="${idx}">↓</button>
+            <button class="btn" data-act="del" data-i="${idx}">✕</button>
+          </div>
+        </div>`;
+      itemsRoot.appendChild(row);
+    });
+    itemsRoot.querySelectorAll('input').forEach(inp=>{
+      inp.oninput = (e)=>{ const i=Number(e.target.dataset.i), k=e.target.dataset.k; state.items[i][k]=e.target.value; };
+    });
+    itemsRoot.querySelectorAll('button').forEach(btn=>{
+      btn.onclick = (e)=>{
+        const i=Number(e.target.dataset.i), act=e.target.dataset.act;
+        if (act==='up' && i>0){ const t=state.items[i-1]; state.items[i-1]=state.items[i]; state.items[i]=t; render(); }
+        if (act==='down' && i<state.items.length-1){ const t=state.items[i+1]; state.items[i+1]=state.items[i]; state.items[i]=t; render(); }
+        if (act==='del'){ state.items.splice(i,1); render(); }
+      };
+    });
+  }
+
+  add.onclick = ()=>{ state.items.push({title:'',notes:''}); render(); };
+  clear.onclick = ()=>{ if(confirm('Clear all items?')){ state.items=[]; render(); } };
+
+  // Load next 30 meetings for convenience
+  try{
+    const meetings = await j(`${WEBAPP_URL}?route=api/public/meetings&limit=30`);
+    meetingSel.innerHTML = '<option value="">Select a meeting…</option>' + meetings.map(m=>`<option value="${m.meeting_id}">${m.date} — ${m.board_name||''} — ${m.title||''}</option>`).join('');
+  }catch{ meetingSel.innerHTML = '<option value="">Could not load meetings</option>'; }
+
+  gen.onclick = async ()=>{
+    const mid = meetingSel.value; const email = document.getElementById('email').value.trim();
+    if (!mid) return alert('Choose a meeting');
+    if (state.items.length===0) return alert('Add at least one agenda item');
+    try{
+      await post({ action:'create_agenda_from_form', meeting_id: mid, items: state.items, footerNote: document.getElementById('footer').value, submitterEmail: email });
+      alert('Agenda submitted to Clerk for approval');
+      state.items = []; render();
+    }catch(e){ alert(e.message); }
+  };
+
+  render();
+</script>
+</body>
+</html>
