@@ -56,18 +56,31 @@
 </div>
 
 <script type="module">
-  import { renderSignIn, postSecure, WEBAPP_URL } from './js/auth.js';
+  import { renderSignIn, postSecure, WEBAPP_URL, getToken, promptSignIn } from './js/auth.js';
   const mid = new URLSearchParams(location.search).get('id');
 
   const app = document.getElementById('app');
-  renderSignIn('signin', async ()=>{ app.style.display='block'; await loadMeta(); await loadQueue(); await listDrive(); });
+  const metaBox = document.getElementById('meta');
 
-  async function j(u){ const r=await fetch(u); return r.json(); }
+  // Show app as soon as we have a token (persisted or fresh)
+  function start() {
+    app.style.display = 'block';
+    loadAll().catch(e=>{
+      metaBox.innerHTML = `<div class="card" style="border-color:#f66"><b>Error:</b> ${e.message}</div>`;
+    });
+  }
+
+  renderSignIn('signin', start);
+  if (getToken()) setTimeout(start, 50);
+
+  async function j(u){ const r=await fetch(u); if(!r.ok) throw new Error('Failed to load: '+r.status); return r.json(); }
   function toB64(file){ return new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result.split(',')[1]); fr.readAsDataURL(file); }); }
+
+  async function loadAll(){ await loadMeta(); await loadQueue(); await listDrive(); }
 
   async function loadMeta(){
     const m = await j(`${WEBAPP_URL}?route=api/public/meeting&id=${encodeURIComponent(mid)}`);
-    document.getElementById('meta').innerHTML = `
+    metaBox.innerHTML = `
       <div class="muted">${m.board_name||''}</div>
       <div style="font-size:18px;margin:6px 0"><strong>${m.date}</strong> — ${m.title||''}</div>
       <div>${m.location||''}</div>
@@ -80,11 +93,20 @@
     try{
       await postSecure('admin_update_meeting', { meeting_id: mid, date:date.value, start_time:time.value, title:title.value, location:loc.value, status:status.value, youtube_url:yt.value });
       alert('Saved'); await loadMeta();
-    }catch(e){ alert(e.message); }
+    }catch(e){
+      if (/sign in/i.test(e.message)) promptSignIn();
+      alert(e.message);
+    }
   };
 
   async function loadQueue(){
-    const all = await postSecure('admin_pending', {});
+    let all = [];
+    try { all = await postSecure('admin_pending', {}); }
+    catch (e) {
+      promptSignIn();
+      document.getElementById('queue').innerHTML = `<div class="muted">Sign in to view pending items. ${e.message}</div>`;
+      return;
+    }
     const mine = all.filter(x=> x.meeting_id===mid);
     const root = document.getElementById('queue'); root.innerHTML='';
     if (!mine.length){ root.innerHTML='<div class="muted">No pending items.</div>'; return; }
@@ -100,9 +122,16 @@
   }
 
   async function listDrive(){
-    const res = await postSecure('admin_drive_list', { meeting_id: mid });
     const out = document.getElementById('drive'); out.innerHTML='';
-    const col = (title, items, tag) => {
+    let res;
+    try {
+      res = await postSecure('admin_drive_list', { meeting_id: mid });
+    } catch (e) {
+      promptSignIn();
+      out.innerHTML = `<div class="card" style="border-color:#f66"><b>Sign-in needed:</b> ${e.message}</div>`;
+      return;
+    }
+    const col = (title, items) => {
       const c=document.createElement('div'); c.className='card';
       c.innerHTML=`<h4>${title}</h4>` + (items.length? '' : '<div class="muted">No files</div>');
       items.forEach(f=>{
@@ -117,8 +146,8 @@
       });
       out.appendChild(c);
     };
-    col('Draft Folder', res.draft||[], 'draft');
-    col('Public Folder', res.public||[], 'public');
+    col('Draft Folder', res.draft||[]);
+    col('Public Folder', res.public||[]);
   }
   btnList.onclick = listDrive;
 
@@ -128,7 +157,7 @@
       const file_b64 = await toB64(file);
       await postSecure('admin_drive_upload',{meeting_id:mid, target:target.value, file_b64, mimeType:file.type||'application/octet-stream', fileName:file.name});
       alert('Uploaded'); await listDrive();
-    }catch(e){ alert(e.message); }
+    }catch(e){ if (/sign in/i.test(e.message)) promptSignIn(); alert(e.message); }
   };
 </script>
 </body>
